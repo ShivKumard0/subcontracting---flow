@@ -60,11 +60,11 @@ const SC_ACTORS=[
    kpis:[['Approval Queue','1'],['Returned','0'],['Value Pending','INR 3.0L'],['RC Breaches','0']]},
   {id:'stores',name:'Vikram Singh',label:'Stores User',department:'Stores / Warehouse',function:'Executor',initials:'VS',email:'vikram.singh@adt.com',
    focus:'Picks and issues reserved material against the outbound key, and receives the processed material back.',
-   journeys:['sub-contracting'],scSteps:[8,16],approvals:0,owned:3,
+   journeys:['sub-contracting'],scSteps:[7,16],approvals:0,owned:3,
    kpis:[['To Issue','2'],['To Receive','1'],['Short Receipts','1'],['Returned','0']]},
   {id:'logistics',name:'Suresh Patel',label:'Logistics User',department:'Logistics',function:'Executor',initials:'SP',email:'suresh.patel@adt.com',
    focus:'Completes packing, transporter, vehicle and dispatch details on the shipment.',
-   journeys:['sub-contracting'],scSteps:[7],approvals:0,owned:1,
+   journeys:['sub-contracting'],scSteps:[8],approvals:0,owned:1,
    kpis:[['To Arrange','1'],['In Transit','2'],['Vehicles Booked','3'],['Pending LR','1']]},
   {id:'dn-approver',name:'Amit Kapoor',label:'Delivery Note Approver',department:'Stores / Dispatch',function:'Approver',initials:'AK',email:'amit.kapoor@adt.com',
    focus:'Approves or returns the delivery note before the challan can be raised.',
@@ -82,7 +82,11 @@ const SC_ACTORS=[
    focus:'Reviews the vendor advance shipping notice and clears or returns it before inward.',
    journeys:['sub-contracting'],scSteps:[14],approvals:1,owned:1,
    kpis:[['To Clear','1'],['Returned','0'],['Cleared Today','3'],['Failed Inspection','0']]},
-  {id:'vendor',name:'ABC Fabricators',label:'Vendor',department:'External — Subcontractor',function:'External',initials:'AF',email:'ops@abcfabricators.in',
+  /* `vendorCode` ties the external persona to a row in the vendor master. Without it FR13.1's
+     "the Vendor shall only be able to view and act on its own applicable approved POs" had
+     nothing to compare against, and an SCR naming any of the three external vendors landed in
+     this one queue. The seed's vendor is V-1001, so this persona is that vendor. */
+  {id:'vendor',name:'ABC Fabricators',label:'Vendor',department:'External — Subcontractor',function:'External',initials:'AF',email:'ops@abcfabricators.in',vendorCode:'V-1001',
    focus:'Raises the advance shipping notice for processed material ready to return.',
    journeys:['sub-contracting'],scSteps:[13],approvals:0,owned:1,
    kpis:[['Open POs','2'],['ASNs Raised','1'],['Returned to Me','0'],['Due This Week','1']]}
@@ -112,8 +116,18 @@ const SC_STEPS=[
   {no:4, name:'Create & Complete Sub-Contracting PO',           short:'Complete PO',       actors:['buyer'],                phase:'procurement', doc:'po'},
   {no:5, name:'Approve / Return Commercial PO',                 short:'PO Approval',       actors:['po-approver'],          phase:'procurement', doc:'po'},
   {no:6, name:'Create Shipment & Reserve Material',             short:'Create Shipment',   actors:['planner'],              phase:'outbound',    doc:'shipment'},
-  {no:7, name:'Shipment Processing & Logistics Arrangement',    short:'Logistics',         actors:['planner','logistics'],  phase:'outbound',    doc:'shipment'},
-  {no:8, name:'Stores Outbound / Goods Issue',                  short:'Goods Issue',       actors:['stores'],               phase:'outbound',    doc:'shipment'},
+  /* LOGISTICS COMES AFTER GOODS ISSUE. These two were the other way round, which had the
+     Logistics User packing, weighing and booking a vehicle for material Stores had not yet
+     picked. FR7.7 "Post-Stores Routing" is explicit — "After Stores completes Goods Issue:
+     Logistics Required = Yes → Logistics User completes Logistics section" — as is FR7.6's
+     "route the Shipment to Stores Outbound / Goods Issue" and the Final Simplified Flow at
+     line 940: "… Submit Shipment → Outbound Key + Transfer Order Generated → Stores Outbound /
+     Goods Issue → Logistics on same Shipment page, if required → Delivery Note Processing".
+     Swapped rather than re-routed 6→8→7→9 so the tile numbers still read in flow order. */
+  {no:7, name:'Stores Outbound / Goods Issue',                  short:'Goods Issue',       actors:['stores'],               phase:'outbound',    doc:'shipment'},
+  // FR7.5 — the Planner may capture logistics during shipment prep (step 6); COMPLETING it is
+  // the Logistics User's job, and shipment/issue data is read-only to them.
+  {no:8, name:'Shipment Processing & Logistics Arrangement',    short:'Logistics',         actors:['logistics'],            phase:'outbound',    doc:'shipment'},
   {no:9, name:'Delivery Note Generation & Approval',            short:'Delivery Note',     actors:['dn-approver'],          phase:'dispatch',    doc:'dn'},
   {no:10,name:'Challan Generation',                             short:'Challan',           actors:['finance'],              phase:'dispatch',    doc:'challan'},
   {no:11,name:'Security Gate Outward',                          short:'Gate Outward',      actors:['security'],             phase:'dispatch',    doc:'challan'},
@@ -358,6 +372,7 @@ let scState={
 let scViewMode='web';               // 'web' | 'mobile' — checker screens only
 let scOpenTxnId=null;               // the transaction open in a detail screen
 let scDashStepFilter=0;             // which step tile is drilled into, 0 = all
+let scDashClosed=false;             // board shows closed / rejected transactions instead of open
 let scSheet=null;                   // the open action sheet: {action, txnId}
 let scForm={};                      // live create/edit form buffer
 let scFormErrors={};
@@ -377,10 +392,21 @@ function scNormalise(t){
   if(!Array.isArray(t.activity))t.activity=[];
   if(!Array.isArray(t.participants))t.participants=[];
   if(!Array.isArray(t.reservations))t.reservations=[];
+  if(!Array.isArray(t.receipts))t.receipts=[];
   if(!Array.isArray(t.scr.issueItems))t.scr.issueItems=[];
   if(!Array.isArray(t.recon.lines))t.recon.lines=[];
   t.step=Number(t.step);
   if(!(t.step>=1&&t.step<=18))t.step=1;
+  /* Migrations for records written by an earlier build. Step 3 is now system-run and has no
+     actor, so a transaction persisted there would load with pendingWith undefined and disappear
+     from every dashboard; steps 7 and 8 swapped meaning, so a record parked on either would land
+     in front of the wrong role. Both are silent data-loss bugs without this. */
+  if(t.step===3)t.step=4;
+  if(t.__v!==2){
+    if(t.step===7||t.step===8)t.step=t.step===7?8:7;
+    if(t.docStatus.challan==='Draft'||t.docStatus.challan==='Generated')t.docStatus.challan='Created';
+    t.__v=2;
+  }
   t.closed=!!t.closed;
   if(SC_POSITIONS.indexOf(t.position)===-1)t.position='Main';
   if(!t.id)t.id='TXN-'+Math.random().toString(36).slice(2,8);
@@ -525,16 +551,24 @@ const SC_POSITIONS=['Main','Reserved','Staging','At Vendor','Returned to Store']
 
    Written from one place (scStampDoc) rather than at each call site, so a document's status and
    the step that changed it can never drift apart. == */
+/* Transcribed from Master Data section D, verbatim. Where a status is NOT in the FRD's list it is
+   not in this one: the PO had Returned and Rejected added (section D line 3373 gives only Draft,
+   Created, Approved, Closed) and the challan had Draft and Generated invented for it in place of
+   Created (line 3376). The guard in scConfirmSheet only stamps Returned when the document's own
+   set contains it, so trimming these lists is what makes that guard mean anything. */
 const SC_DOC_STATUSES={
   scr:['Created','Sent for Approval','Returned','Modified','Approved','Rejected','Closed'],
-  po:['Draft','Created','Approved','Returned','Rejected','Closed'],
+  po:['Draft','Created','Approved','Closed'],
   shipment:['Created','Freezed Outbound Release','Challan Generated','Closed'],
   dn:['Generated','Approved','Returned'],
-  challan:['Draft','Generated','Gate Cleared','Closed'],
+  challan:['Created','Gate Cleared','Closed'],
+  // FR14.5 defines Return ASN, so Returned is a real transition the FRD's own status list omits.
   asn:['Created','QC Cleared','Returned'],
   imr:['Created','Confirmed'],
   recon:['In Progress','Full Receipt Confirmed']
 };
+// Section D's Receivable Item statuses — the line-level status, distinct from the documents above.
+const SC_LINE_STATUSES=['Open','Partially Received','Fully Received','Short-Closed','Returned'];
 const SC_DOC_LABELS={scr:'SCR',po:'Purchase Order',shipment:'Shipment',dn:'Delivery Note',challan:'Challan',asn:'ASN',imr:'IMR',recon:'Reconciliation'};
 function scDocStatus(txn,doc){return (txn.docStatus||{})[doc]||'';}
 function scStampDoc(txn,doc,status){
@@ -565,6 +599,12 @@ function scOverdue(txn){
 function scLineStatus(txn){
   if(txn.scr.lineStatus==='Short-Closed')return 'Short-Closed';
   const exp=Number(txn.scr.recvQty||0),got=Number(txn.imr.receivedQty||0);
+  /* Section D's fifth value. "Returned" was the one Receivable Item status nothing could ever
+     produce, even though FR17.5 records returned issue material and the reason master carries a
+     "Returned Issue Material Reason" category for it. A line whose material came back unprocessed
+     with nothing received is Returned, not Open. */
+  const returned=(txn.scr.issueItems||[]).reduce(function(a,r){return a+Number(r.returnedQty||0);},0);
+  if(!got&&returned>0)return 'Returned';
   if(!got)return 'Open';
   if(got>=exp)return 'Fully Received';
   return 'Partially Received';
@@ -581,6 +621,12 @@ function scMoveInventory(txn,to,note){
      Billable = No  → FR4.4: the zero-value PO is system-approved, so step 5 never runs.
      Logistics = No → FR7.5: logistics is skipped and goods issue goes straight to the note.
    Resolved here so every caller — primary action, checker approve, seed — routes identically. -- */
+// The shipment's Logistics Required (FR6.2) overrides the SCR's (FR1.2) once the Planner has set
+// it; every routing decision reads this rather than txn.scr.logistics directly.
+function scLogisticsRequired(txn){
+  const v=txn.shipment&&txn.shipment.logistics;
+  return v===undefined||v===''?(txn.scr.logistics||'Yes'):v;
+}
 function scNextStep(txn,from){
   let n=scSpec(from).next;
   /* FR3 IS THE SYSTEM'S WORK, NOT A PERSON'S. This routed to the Planner and asked them to press
@@ -594,7 +640,10 @@ function scNextStep(txn,from){
      after approval is the Buyer. */
   if(n===3)n=4;
   if(n===5&&txn.scr.billable==='No')n=6;              // zero-value PO needs no manual approval
-  if(n===7&&txn.scr.logistics==='No')n=8;             // no logistics to arrange
+  /* FR7.7 — after goods issue: Logistics Required = No goes "directly to Delivery Note
+     processing". The shipment's own flag wins over the SCR's, because FR6.2 lets the Planner
+     change it when creating the shipment; it falls back to the SCR when never set. */
+  if(n===8&&scLogisticsRequired(txn)==='No')n=9;
   return n;
 }
 /* == FR3 — RECEIVABLE PRODUCT / WIP AND BOM PROCESSING ======================================
@@ -604,8 +653,21 @@ function scNextStep(txn,from){
    approval. Recorded on the transaction so step 3's panel can show what the system did, and
    logged as a System action so the audit trail does not attribute it to whoever clicked last. */
 function scRunFr3(txn){
-  const s=txn.scr,existing=scItem(s.recvItem);
+  const s=txn.scr;
   const recvQty=Number(s.recvQty||0);
+  /* FR3.3 — "Before creating a new Product, the system shall verify whether the Product already
+     exists. The duplicate check shall consider: Product Name / Description, Base UOM, Product
+     Type, applicable Variant / Revision." A lookup by product CODE alone satisfies none of that:
+     a receivable described identically to an existing product under a different code minted a
+     duplicate, which is the one outcome FR3.3 forbids. Code stays the fast path. */
+  const wantType=s.base==='Project'?'Finished':'Semi-Finished / WIP';
+  const wantName=String(s.title||s.recvItem||'').trim().toLowerCase();
+  const existing=scItem(s.recvItem)||scMaster.items.find(function(i){
+    return String(i.name||'').trim().toLowerCase()===wantName
+      && String(i.uom||'')===String(s.recvUom||i.uom||'')
+      && String(i.kind||'')===wantType
+      && String(i.variant||'')===String(s.variant||i.variant||'');
+  });
   // FR3.1 / FR3.2 — reuse the existing product untouched, or mint a Pending one.
   if(existing){
     txn.product={code:existing.code,name:existing.name,uom:existing.uom,
@@ -638,7 +700,20 @@ function scRunFr3(txn){
   // FR2.5 — approval creates the linked PO. FR4: "Initial PO Status = Draft". The Buyer COMPLETES
   // a PO that already exists; they were minting it themselves, so until they saved one the
   // transaction had an approved SCR and no order against it.
-  if(!txn.po.no){txn.po.no=scNextNo('po');txn.po.createdOn=scNow();}
+  if(!txn.po.no){
+    txn.po.no=scNextNo('po');txn.po.createdOn=scNow();
+    /* FR4.2/FR4.3 — the PO defaults from the approved SCR: Purchase Office "Default from SCR",
+       and the Rate Contract is an AUTO-LINK ("Valid Rate Contract exists → Rate Contract shall be
+       linked and applicable Price, Price Basis and Currency shall be auto-populated"). None of it
+       was carried across, so the Buyer re-keyed values the system already held and the auto-fill
+       only fired if they happened to re-pick the same contract by hand. */
+    if(s.purchaseOffice)txn.po.purchaseOffice=s.purchaseOffice;
+    if(s.rateContract){
+      const rc=scRateContract(s.rateContract);
+      txn.po.rateContract=s.rateContract;
+      if(rc){txn.po.price=rc.price;txn.po.basis=rc.basis;txn.po.currency=rc.currency;}
+    }
+  }
   const sys={byId:'',by:'System',role:'Automated',source:'System'};
   scLog(txn,txn.product.created
       ? 'Receivable product '+txn.product.code+' created (Pending) and '+txn.bom.length+'-component BOM '+txn.bomRef+' built'
@@ -667,10 +742,13 @@ const SC_STAMPS={
   4:[['po','Created']],
   5:[['po','Approved']],
   6:[['shipment','Created']],
-  7:[['shipment','Created']],
-  8:[['shipment','Freezed Outbound Release'],['dn','Generated']],
-  9:[['dn','Approved'],['challan','Draft']],
-  10:[['challan','Generated'],['shipment','Challan Generated']],
+  7:[['shipment','Freezed Outbound Release']],   // FR8.5 — goods issue freezes the outbound release
+  // FR7.5 line 1076 — "Shipment Status shall remain Freezed Outbound Release while Logistics
+  // information is being completed", so logistics re-affirms the status rather than changing it.
+  8:[['shipment','Freezed Outbound Release']],
+  // The DN is minted on ARRIVAL at step 9 (see scAdvance), not stamped on the way out of it.
+  9:[['dn','Approved']],
+  10:[['challan','Created'],['shipment','Challan Generated']],
   11:[['challan','Gate Cleared']],
   12:[['shipment','Challan Generated']],      // FR12.3 — shipment status does NOT change here
   13:[['asn','Created']],
@@ -690,12 +768,25 @@ function scAdvance(txn,step,opts){
   if(!opts.noStamp)scApplyStamps(txn,from);
   // FR2.5 — crossing the (system-run) step 3 on the way out of approval does FR3's processing.
   if(from===2&&step===4&&!opts.noStamp)scRunFr3(txn);
-  /* A step with two declared actors routes to the one the FRD names for the WORK, not simply
-     actors[0]. Step 7's logistics section is the Logistics User's job (FR7.5: "the authorized
-     Logistics User shall complete / confirm the required Logistics information") — routing it to
-     actors[0] left that persona with an empty board for the entire journey, and never even added
-     them to `participants`, so nothing was ever visible to them. */
-  if(!opts.pendingWith&&step===7&&txn.scr.logistics==='Yes')opts.pendingWith='logistics';
+  /* FR9.1 — the Delivery Note is generated when the shipment REACHES delivery-note processing,
+     which FR7.7 places after goods issue and after logistics when logistics is required. Minting
+     it in the goods-issue branch produced the DN before the logistics leg had run, so FR9.1's
+     "Logistics Required = Yes but Logistics incomplete → Generation blocked" had nothing left to
+     block. Arrival at step 9 is the one point both routes converge on. */
+  /* FR16.1 — "IMR Status | Created", and FR16.5's transition is "Created → Confirmed". The only
+     IMR stamp anywhere was Confirmed, so Created was dead vocabulary: while Stores was working on
+     the receipt the document trail showed no IMR row at all, and a saved-but-unconfirmed IMR had
+     no number and no identity. */
+  if(step===16&&!opts.noStamp){
+    if(!txn.imr.no)txn.imr.no=scNextNo('imr');
+    if(!scDocStatus(txn,'imr'))scStampDoc(txn,'imr','Created');
+  }
+  if(step===9&&!opts.noStamp&&!txn.dn.no){
+    txn.dn.no=scNextNo('dn');
+    txn.dn.date=scNow();
+    txn.dn.issuedBy=typeof activePersonaId!=='undefined'?activePersonaId:'stores';
+    scStampDoc(txn,'dn','Generated');
+  }
   const spec=SC_STEP_SPEC[step]||{};
   txn.step=step;
   txn.pendingWith=opts.pendingWith||scStep(step).actors[0];
@@ -742,33 +833,52 @@ const SC_STEP_SPEC={
   2:{kind:'checker',doc:'scr',title:'Review SCR',status:'Sent for Approval',
      actions:[{id:'approve',label:'Approve',tone:'green'},{id:'return',label:'Return',tone:'amber',set:'RC-SCRRET'},{id:'reject',label:'Reject',tone:'red',set:'RC-SCRREJ'}],
      next:3,back:1,approveStatus:'Approved',returnStatus:'Returned',rejectStatus:'Rejected'},
-  3:{kind:'maker',doc:'scr',status:'Approved',title:'Receivable Product / WIP & BOM Processing',
-     primary:{id:'confirm',label:'Confirm Product & BOM'},next:4},
+  // Run by the system on SCR approval (scRunFr3). No actor, no form, no button — the `primary`
+  // that used to be here described a click nobody makes. Kept in the map so scSpec(3) and
+  // SC_STAMPS[3] still resolve for any record that has to be migrated through it.
+  3:{kind:'system',doc:'scr',status:'Approved',title:'Receivable Product / WIP & BOM Processing',next:4},
   4:{kind:'maker',doc:'po',status:'Draft',title:'Complete Sub-Contracting PO',
      primary:{id:'generate',label:'Generate PO'},secondary:{id:'save',label:'Save'},
      extra:[{id:'return-scr',label:'Return SCR',tone:'amber',set:'RC-BUYRET',toStep:1}],next:5,submitStatus:'Created'},
+  /* FR5.2 declares exactly two actions — Approve and Return — and FR5.5 makes Return the only
+     correction path for a PO. The Reject that used to sit here closed the transaction terminally
+     for a document the FRD always sends back to the Buyer, and it borrowed RC-PORET ("Return PO")
+     because the FRD defines no PO reject reason set at all. */
   5:{kind:'checker',doc:'po',title:'Review Commercial PO',status:'Created',
-     actions:[{id:'approve',label:'Approve PO',tone:'green'},{id:'return',label:'Return',tone:'amber',set:'RC-PORET'},{id:'reject',label:'Reject',tone:'red',set:'RC-PORET'}],
-     next:6,back:4,approveStatus:'Approved',returnStatus:'Returned',rejectStatus:'Rejected'},
+     actions:[{id:'approve',label:'Approve PO',tone:'green'},{id:'return',label:'Return',tone:'amber',set:'RC-PORET'}],
+     next:6,back:4,approveStatus:'Approved',returnStatus:'Returned'},
   6:{kind:'maker',doc:'shipment',status:'Created',title:'Create Shipment & Reserve Material',
      primary:{id:'submit',label:'Submit Shipment'},secondary:{id:'save',label:'Save'},next:7},
-  7:{kind:'maker',doc:'shipment',status:'Created',title:'Shipment Processing & Logistics',
-     primary:{id:'confirm',label:'Confirm Logistics'},next:8},
-  8:{kind:'checker',doc:'shipment',title:'Stores Outbound / Goods Issue',status:'Created',
+  7:{kind:'checker',doc:'shipment',title:'Stores Outbound / Goods Issue',status:'Created',
      // FR8.1/8.3 — lot or serial is captured HERE, at the moment of issue, and goods issue is
      // blocked without it. The wireframes put it in the release sheet ("Scan or select lot")
      // rather than on the record, which is where a storesperson actually reads a label.
      actions:[{id:'release',label:'Release / Goods Issue',tone:'green',
        fields:[{id:'lot',label:'Lot / Serial no.',type:'text',req:true,ph:'Scan or select lot'}]},
        {id:'return',label:'Return',tone:'amber',set:'RC-STORERET',toStep:6}],
-     next:9,back:6,approveStatus:'Freezed Outbound Release'},
+     next:8,back:6,approveStatus:'Freezed Outbound Release'},
+  // FR7.5 — "Shipment and Issue Item information shall remain read-only for the Logistics User",
+  // so this step edits only the logistics block. FR7.7 routes it straight to the Delivery Note.
+  8:{kind:'maker',doc:'shipment',status:'Freezed Outbound Release',title:'Shipment Processing & Logistics',
+     primary:{id:'confirm',label:'Confirm Logistics'},secondary:{id:'save',label:'Save'},next:9},
+  /* FR9.5 — "route Logistics / Dispatch corrections to the Logistics User; route material /
+     Goods Issue corrections to Stores / Planner, as applicable." One unconditional toStep sent
+     every return to Stores, including DNR-03 Missing Logistics Detail and DNR-04 Packing
+     Incorrect, which Stores cannot fix. toStep is resolved per reason code below. */
   9:{kind:'checker',doc:'dn',title:'Delivery Note Approval',status:'Generated',
-     actions:[{id:'approve',label:'Approve',tone:'green'},{id:'return',label:'Return',tone:'amber',set:'RC-DNRET',toStep:8}],
-     next:10,back:8,approveStatus:'Approved'},
-  10:{kind:'checker',doc:'challan',title:'Challan Generation',status:'Draft',
+     actions:[{id:'approve',label:'Approve',tone:'green'},
+       {id:'return',label:'Return',tone:'amber',set:'RC-DNRET',
+        toStep:function(txn,sheet){
+          const logisticsFix=['DNR-03','DNR-04'].indexOf(sheet&&sheet.reason)>-1;
+          return logisticsFix&&scLogisticsRequired(txn)==='Yes'?8:7;}}],
+     next:10,back:7,approveStatus:'Approved'},
+  /* Master Data section D: "Challan | Created, Gate Cleared, Closed". Draft and Generated were
+     invented here, so FR11.1's gate-outward entry condition ("Challan Status = Created") named a
+     value this system could never produce, and every FR20 row read "Generated → Gate Cleared". */
+  10:{kind:'checker',doc:'challan',title:'Challan Generation',
      actions:[{id:'generate',label:'Generate Challan',tone:'amber'},{id:'return',label:'Return',tone:'red',set:'RC-CHRET',toStep:9}],
-     next:11,back:9,approveStatus:'Generated'},
-  11:{kind:'checker',doc:'challan',title:'Security Gate Outward',status:'Generated',
+     next:11,back:9,approveStatus:'Created'},
+  11:{kind:'checker',doc:'challan',title:'Security Gate Outward',status:'Created',
      /* FR11.2/11.3 — the gate check, and the two conditional reason codes the wireframes never
         drew a home for. Security may correct the vehicle and the package count at the gate, and
         the FRD makes a reason MANDATORY whenever either differs from what was planned. Both
@@ -796,8 +906,18 @@ const SC_STEP_SPEC={
           help:'Mandatory — the count differs from the challan'},
          {id:'gateExitAt',label:'Gate exit time',type:'text',req:true,def:function(){return scNow();}},
          {id:'sealNo',label:'Seal / Lock No.',type:'text'}]},
-       {id:'return',label:'Return to Stores',tone:'amber',set:'RC-SECRET',toStep:8}],
-     next:12,back:8,approveStatus:'Gate Cleared'},
+       /* FR11.6 — "the transaction shall route to the applicable preceding stage for correction",
+          and RC-SECRET's own values name different owners: SEC-02 is a challan problem (Finance),
+          SEC-05 a vehicle/package problem (Logistics, or Stores when there is no logistics leg).
+          A single toStep sent all seven to Stores, in front of a role that can fix neither. */
+       {id:'return',label:'Return for Correction',tone:'amber',set:'RC-SECRET',
+        toStep:function(txn,sheet){
+          const r=sheet&&sheet.reason;
+          if(r==='SEC-02')return 10;                                   // challan details — Finance
+          if(r==='SEC-05')return scLogisticsRequired(txn)==='Yes'?8:7;  // vehicle / packages
+          return 7;                                                    // material / documents — Stores
+        }}],
+     next:12,back:7,approveStatus:'Gate Cleared'},
   12:{kind:'checker',doc:'shipment',title:'Shipment Confirmation',status:'Gate Cleared',
      actions:[{id:'confirm',label:'Confirm Shipment',tone:'green'}],next:13,approveStatus:'At Vendor'},
   13:{kind:'maker',doc:'asn',status:'Created',title:'Raise Advance Shipping Notice',
@@ -890,18 +1010,42 @@ const SC_FORMS={
     ]}
   ],
   4:[{section:'PO Header',fields:[
-      {id:'poNo',label:'PO No.',type:'ro',val:function(){return 'Auto-generated on generate';}},
+      // The PO now exists before the Buyer opens it (FR2.5 creates it at approval), so these show
+      // the record's real values instead of claiming a number will appear later.
+      {id:'poNo',label:'PO No.',type:'ro',val:function(f,t){return (t&&t.po.no)||'Auto-generated on approval';}},
       {id:'orderType',label:'Order Type',type:'ro',val:function(){return 'SUB';}},
       {id:'lotType',label:'Lot Type',type:'ro',val:function(){return 'Specific';}},
-      {id:'poStatus',label:'PO Status',type:'ro',val:function(){return 'Draft';}}
+      {id:'poStatus',label:'PO Status',type:'ro',val:function(f,t){return scDocStatus(t,'po')||'Draft';}}
     ]},
     {section:'Commercial Terms',fields:[
       {id:'taxCode',label:'Tax Code',type:'select',req:true,opts:function(){return scMaster.taxCodes.map(function(t){return{v:t,t:t};});}},
-      {id:'purchaseOffice',label:'Purchase Office',type:'select',req:true,opts:function(){return scMaster.purchaseOffices.map(function(p){return{v:p.code,t:p.name};});}},
+      // FR4.2 — "Default from SCR; Buyer may select applicable value". It was discarding a value
+      // the SCR already holds and making the Buyer re-key it.
+      {id:'purchaseOffice',label:'Purchase Office',type:'select',req:true,
+       def:function(f,t){return t?t.scr.purchaseOffice:'';},
+       opts:function(){return scMaster.purchaseOffices.map(function(p){return{v:p.code,t:p.name};});}},
       {id:'poSeries',label:'PO Series',type:'select',req:true,opts:[{v:'SUB-PO Series 2026',t:'SUB-PO Series 2026'}]},
-      {id:'rateContract',label:'Rate Contract',type:'select',opts:function(){return scMaster.rateContracts.filter(function(r){return r.status==='Active';}).map(function(r){return{v:r.no,t:r.no};});},
-       help:'Optional — auto-fills price, basis and currency'},
-      {id:'price',label:'Price / Unit',type:'num',req:true,when:function(f,t){return !t||t.scr.billable!=='No';},ph:'0.00'},
+      /* FR4.3 — the contract list must be filtered to the SCR's vendor. Without the predicate a
+         PO for V-1001 could be priced off V-1002's contract at a completely different rate; the
+         SCR form applies exactly this filter and the PO form had dropped it. */
+      {id:'rateContract',label:'Rate Contract',type:'select',
+       def:function(f,t){return t?t.scr.rateContract:'';},
+       opts:function(f,t){
+         const vendor=t&&t.scr.vendor;
+         return scMaster.rateContracts.filter(function(r){return r.status==='Active'&&(!vendor||r.vendor===vendor);})
+           .map(function(r){return{v:r.no,t:r.no+' · ₹'+r.price+' '+r.basis};});},
+       help:'Active contracts for this vendor only — auto-fills price, basis and currency'},
+      /* FR4.3 — "Where the Price is derived from an approved Rate Contract, it shall remain
+         read-only unless an authorized override is specifically permitted." It stayed a free
+         numeric input, so a Buyer could silently overwrite a contracted rate after linking it. */
+      // A distinct id, not a second field called `price` — scLiveForm keys by id, so two entries
+      // sharing one would overwrite each other in the form buffer. `price` stays the stored value
+      // (scSetField auto-fills it from the contract); this is the read-only presentation of it.
+      {id:'priceLocked',label:'Price / Unit',type:'ro',when:function(f,t){return (!t||t.scr.billable!=='No')&&!!f.rateContract;},
+       val:function(f){const rc=scRateContract(f.rateContract);return rc?rc.price+'  ·  locked to '+rc.no:'';},
+       help:'Read-only — derived from the approved rate contract (FR4.3)'},
+      {id:'price',label:'Price / Unit',type:'num',req:true,
+       when:function(f,t){return (!t||t.scr.billable!=='No')&&!f.rateContract;},ph:'0.00'},
       {id:'basis',label:'Price Basis',type:'select',req:true,when:function(f,t){return !t||t.scr.billable!=='No';},
        opts:function(){return scMaster.priceBasis.map(function(b){return{v:b,t:b};});}},
       {id:'currency',label:'Currency',type:'select',req:true,when:function(f,t){return !t||t.scr.billable!=='No';},
@@ -916,19 +1060,30 @@ const SC_FORMS={
     ]}],
   6:[{section:'Shipment Header',fields:[
       {id:'challanType',label:'Challan Type',type:'select',req:true,opts:function(){return scMaster.challanTypes.map(function(c){return{v:c,t:c};});}},
+      // FR6.2 — "Logistics Required | Yes / No | Default from SCR | Yes". It was un-editable
+      // inheritance from the SCR, so the Planner could not decide logistics at shipment creation
+      // even though the FRD makes it a mandatory field on this screen.
+      {id:'logistics',label:'Logistics Required',type:'yesno',req:true,
+       def:function(f,t){return t?(t.scr.logistics||'Yes'):'Yes';},
+       help:'Defaults from the SCR — determines whether the shipment routes through Logistics after goods issue'},
       {id:'dnApprover',label:'Delivery Note Approver',type:'select',req:true,opts:function(){return[{v:'dn-approver',t:scActor('dn-approver').name}];}},
       {id:'expectedReturn',label:'Expected Date of Return',type:'date',req:true,future:true,help:'Must be a future date'},
       {id:'reference',label:'Your / Our Reference',type:'text',ph:'Optional'},
       {id:'remarks',label:'Remarks',type:'textarea',ph:'Optional',max:500}
     ]}],
-  7:[{section:'Logistics Arrangement',fields:[
+  8:[{section:'Logistics Arrangement',fields:[
       {id:'packageType',label:'Package Type / Details',type:'select',req:true,opts:[{v:'Wooden Box',t:'Wooden Box'},{v:'Pallet',t:'Pallet'},{v:'Crate',t:'Crate'},{v:'Loose',t:'Loose'}]},
       {id:'packages',label:'Number of Packages',type:'num',req:true},
       {id:'weight',label:'Package Weight',type:'num',req:true},
       {id:'weightUom',label:'Weight UOM',type:'select',req:true,opts:[{v:'Kg',t:'Kg'},{v:'MT',t:'MT'}],def:'Kg'},
       {id:'dispatchMode',label:'Mode of Dispatch',type:'select',req:true,opts:[{v:'Road',t:'Road'},{v:'Rail',t:'Rail'},{v:'Sea',t:'Sea'},{v:'Air',t:'Air'},{v:'Courier',t:'Courier'},{v:'Hand',t:'Hand'}]},
       {id:'transporter',label:'Transporter',type:'text',ph:'Transporter name'},
-      {id:'vehicle',label:'Vehicle No.',type:'text',ph:'MH12 AB 1234'},
+      /* FR7.5 — "Vehicle No. | Conditional | Required based on selected transport mode". It had
+         no req and no when, so Confirm Logistics passed with the vehicle blank and FR11's gate
+         check then compared the counted vehicle against an empty planned value. */
+      {id:'vehicle',label:'Vehicle No.',type:'text',ph:'MH12 AB 1234',req:true,
+       when:function(f){return ['Road','Rail'].indexOf(f.dispatchMode)>-1;},
+       help:'Mandatory for Road and Rail dispatch'},
       {id:'driver',label:'Driver Details',type:'text',ph:'Name · contact'},
       {id:'lr',label:'LR / Transport Reference No.',type:'text'},
       {id:'lrDate',label:'LR / Transport Date',type:'date'},
@@ -944,7 +1099,9 @@ const SC_FORMS={
       {id:'remarks',label:'Remarks',type:'textarea',ph:'Optional',max:500}
     ]}],
   16:[{section:'IMR Header',fields:[
-      {id:'receiptAt',label:'Receipt Date & Time',type:'ro',val:function(){return scNow();}},
+      // Stamped on confirm (scPrimaryAction), not recomputed on render — a read-only field never
+      // enters scForm, so calling scNow() here showed the time the IMR was being LOOKED at.
+      {id:'receiptAt',label:'Receipt Date & Time',type:'ro',val:function(f,t){return (t&&t.imr.receiptAt)||'Stamped on confirmation';}},
       {id:'receivingLocation',label:'Receiving Location',type:'select',req:true,
        opts:function(){const out=[];scMaster.warehouses.forEach(function(w){w.locations.forEach(function(l){out.push({v:w.code+'/'+l.code,t:w.name+' — '+l.name});});});return out;}},
       {id:'receivedQty',label:'Received Quantity',type:'num',req:true,help:'Cannot exceed the expected receivable quantity'},
@@ -1017,7 +1174,7 @@ function scSeed(){
            that did it here is gone. */
         if(nxt===3){scRunFr3(t);nxt=4;s=3;}
         t.step=nxt;
-        t.pendingWith=(nxt===7&&t.scr.logistics==='Yes')?'logistics':scStep(nxt).actors[0];
+        t.pendingWith=scStep(nxt).actors[0];
         const sp=scSpec(nxt);
         if(sp.status)t.status=sp.status;
         if(t.participants.indexOf(t.pendingWith)===-1)t.participants.push(t.pendingWith);
@@ -1031,8 +1188,19 @@ function scSeed(){
           t.reservations=(t.scr.issueItems||[]).map(function(r){return{item:r.item,warehouse:r.warehouse,location:r.location,qty:Number(r.qty||0)};});
           t.position='Reserved';
         }
-        if(s===8){t.position='Staging';if(!t.dn.no){t.dn.no=scNextNo('dn');t.dn.date=scNow();t.dn.issuedBy='stores';}}
-        if(s===9&&!t.challan.no){t.challan.no=scNextNo('challan');t.challan.date=scNow();}
+        // Step 7 is now the goods issue; the DN is generated on ARRIVAL at step 9, so it is minted
+        // when the walk leaves step 8 (logistics) or step 7 (when there is no logistics leg).
+        if(s===7){t.position='Staging';t.shipment.issuedBy='stores';t.shipment.issuedAt=scNow();}
+        if(nxt===9&&!t.dn.no){t.dn.no=scNextNo('dn');t.dn.date=scNow();t.dn.issuedBy='stores';scStampDoc(t,'dn','Generated');}
+        // Mirror scAdvance: the IMR exists as Created the moment Stores receives the transaction.
+        if(nxt===16&&!t.imr.no){t.imr.no=scNextNo('imr');scStampDoc(t,'imr','Created');}
+        if(s===8){t.shipment.logisticsBy='logistics';t.shipment.logisticsAt=scNow();}
+        /* The challan is minted when Finance GENERATES it, i.e. on the way out of step 10. This
+           fired at s===9, so a record seeded AT step 10 — the Finance demo record — already
+           carried a challan number before anyone had pressed Generate Challan, and the runtime
+           mint is guarded by `!txn.challan.no`, making that button a no-op on exactly the record
+           a demo starts from. */
+        if(s===10&&!t.challan.no){t.challan.no=scNextNo('challan');t.challan.date=scNow();t.challan.generatedBy='finance';}
         if(s===11){
           t.challan.gateOutAt=scNow();
           scState.seq.gatepass=(scState.seq.gatepass||0)+1;
@@ -1043,7 +1211,9 @@ function scSeed(){
         if(s===13&&!t.asn.no){t.asn.no=scNextNo('asn');t.asn.qtyReady=t.scr.recvQty;
           t.asn.docs=[{name:'Inspection_Certificate.pdf',at:scNow(),by:'Vendor'}];}
         if(s===16&&!t.imr.no){t.imr.no=scNextNo('imr');t.imr.receivedQty=t.scr.recvQty;
-          t.imr.receivingLocation='FG-WH/FG-01';t.position='Returned to Store';}
+          t.imr.receivingLocation='FG-WH/FG-01';t.imr.receivedBy='stores';t.imr.receiptAt=scNow();
+          // Mirror what a real confirmation does, so a seeded reconciliation has stock behind it.
+          scReceiveMaterial(t,Number(t.scr.recvQty||0));}
       }
       t.pendingSince=new Date(Date.now()-(2+step)*3600000).toISOString();
     }
@@ -1054,10 +1224,10 @@ function scSeed(){
   };
   mk(1,{scr:undefined});                                    // Planner — a draft to finish
   mk(2,{});                                                 // PMG Approver — awaiting approval
-  mk(7,{});                                                 // Logistics User — dispatch to arrange
+  mk(7,{});                                                 // Stores — goods issue
   mk(4,{});                                                 // Buyer — PO to complete
   mk(5,{});                                                 // PO Approver — PO to approve
-  mk(8,{});                                                 // Stores — goods issue
+  mk(8,{});                                                 // Logistics User — dispatch to arrange
   mk(9,{});                                                 // DN Approver
   mk(10,{});                                                // Finance — challan
   mk(11,{});                                                // Security — gate outward
@@ -1187,6 +1357,9 @@ function scValidate(txn,step){
       if(!(Number(it.qty)>0))scFormErrors.issueItems='Issue item '+n+' needs a quantity greater than zero';
       if(!it.warehouse)scFormErrors.issueItems='Issue item '+n+' needs a warehouse';
       if(!it.location)scFormErrors.issueItems='Issue item '+n+' needs a storage location';
+      // FR1.6 — "Adjustment Order Reference | Mandatory when WIP Adjustment Required = Yes".
+      if(it.wipAdjust==='Yes'&&!String(it.adjustmentOrder||'').trim())
+        scFormErrors.issueItems='Issue item '+n+' is WIP and needs an Adjustment Order Reference';
     });
     // FR1.8 — Remarks become mandatory when the non-billable reason is Other.
     if(f.billable==='No'&&f.nonBillReason&&scRemarksRequired('RC-NONBILL',f.nonBillReason)&&!String(f.remarks||'').trim())
@@ -1199,6 +1372,14 @@ function scValidate(txn,step){
   if(step===13){
     const open=Number(txn.scr.recvQty||0),got=Number(f.qtyReady||0);
     if(got>open)scFormErrors.qtyReady='Cannot exceed the open receivable quantity of '+open;
+    /* FR13.1 — "The Vendor shall only be able to view and act on its own applicable approved POs",
+       and FR13.3 validates that the "Vendor matches the applicable PO". Nothing tied the Vendor
+       persona to a vendor code, so an SCR naming any vendor landed in the same queue and could be
+       actioned by whoever held it. */
+    const me=scActor(activePersonaId);
+    if(me&&me.vendorCode&&txn.scr.vendor&&txn.scr.vendor!==me.vendorCode)
+      scFormErrors.__asn='This transaction is for '+((scVendor(txn.scr.vendor)||{}).name||txn.scr.vendor)
+        +'. You can only raise an ASN against your own purchase orders.';
     // FR13.3 — submission is blocked until the mandatory inspection documents are attached.
     if(!((txn.asn.docs||[]).length))scFormErrors.__asn='At least one inspection document must be attached before the ASN can be raised.';
   }
@@ -1254,16 +1435,23 @@ function scPrimaryAction(){
       txn.shipment.transferOrder='TO-2026-'+String(1000+scState.seq.outbound);
     }
   }
-  if(step===13&&!txn.asn.no)txn.asn.no=scNextNo('asn');
+  // FR13.2 — "record Created By and Created Date-Time" on the ASN.
+  if(step===13&&!txn.asn.no){txn.asn.no=scNextNo('asn');txn.asn.createdBy=activePersonaId;txn.asn.createdOn=scNow();}
   if(step===16&&!txn.imr.no)txn.imr.no=scNextNo('imr');
   if(step===4)txn.po.completedBy=activePersonaId;              // FR5.3 maker-checker
+  // FR7.5 — the Logistics User completed the logistics block.
+  if(step===8){txn.shipment.logisticsBy=activePersonaId;txn.shipment.logisticsAt=scNow();}
   // FR6.4 — submitting the shipment reserves the material against this transaction.
   if(step===6)scReserveMaterial(txn);
   // FR16.4 — a confirmed IMR books the receivable into the selected receiving location.
   if(step===16){
     const exp=Number(txn.scr.recvQty||0),got=Number(txn.imr.receivedQty||0);
     txn.imr.short=Math.max(0,exp-got);
-    scMoveInventory(txn,'Returned to Store','Receivable booked into '+(txn.imr.receivingLocation||'store'));
+    // FR16.3 — "record Received By and Receipt Date-Time". The form field was type:'ro' calling
+    // scNow() on every render, so it displayed whatever time it was being LOOKED at and was never
+    // written on commit (read-only fields never enter scForm).
+    txn.imr.receivedBy=activePersonaId;txn.imr.receiptAt=scNow();
+    scReceiveMaterial(txn,got);
   }
   /* No status override on the maker path. scAdvance applies the TARGET step's own status, which
      is the status of the document that step is about — a PO reaching step 5 reads "Created",
@@ -1272,15 +1460,19 @@ function scPrimaryAction(){
      Checker actions still pass an explicit status, because an approval genuinely names one
      (Freezed Outbound Release, Gate Cleared, At Vendor) that the next step's spec does not. */
   const to=scNextStep(txn,step);
+  scAdvance(txn,to,{action:spec.primary.label});
   /* FR4.4 — "Draft → Created → Approved. The zero-value PO shall be system-approved without
-     manual PO approval." Skipping step 5 also skipped SC_STAMPS[5], so the PO was left sitting
-     at Created for the life of the transaction while the log claimed it had been approved. The
-     stamp the skipped step would have applied has to be applied here instead. */
+     manual PO approval." This has to run AFTER scAdvance, not before: scAdvance re-applies the
+     SOURCE step's forward stamps, and SC_STAMPS[4] is [['po','Created']] — so stamping Approved
+     first meant scAdvance immediately overwrote it back to Created, and a non-billable PO never
+     reached Approved for the life of the transaction while the log claimed it had. */
   if(to===6&&step===4&&txn.scr.billable==='No'){
     scStampDoc(txn,'po','Approved');
-    scLog(txn,'PO system-approved (zero value — no manual approval)','Created','Approved');
+    txn.po.approvedBy='';txn.po.approvedAt=scNow();
+    scLog(txn,'PO system-approved (zero value — no manual approval)','Created','Approved',
+      {by:'System',role:'Automated',source:'System'});
+    scSave();
   }
-  scAdvance(txn,to,{action:spec.primary.label});
   renderADTPage();
 }
 
@@ -1384,13 +1576,15 @@ function scConfirmSheet(){
        in Master Data section D, so returning at step 8 or 11 wrote a value that does not exist;
        FR11.6 is explicit that the Shipment stays Challan Generated on a Security return. */
     const backDoc=act.id==='return-scr'?'scr':spec.doc;
-    if((SC_DOC_STATUSES[backDoc]||[]).indexOf('Returned')>-1)scStampDoc(txn,backDoc,'Returned');
-    const back=act.toStep||spec.back||1;
+    const backDocReturns=(SC_DOC_STATUSES[backDoc]||[]).indexOf('Returned')>-1;
+    if(backDocReturns)scStampDoc(txn,backDoc,'Returned');
+    // toStep may be a function of (txn, sheet): FR9.5 and FR11.6 both route by reason code.
+    const back=(typeof act.toStep==='function'?act.toStep(txn,scSheet):act.toStep)||spec.back||1;
     /* A return does NOT unwind the material. FR8.6 sends a shipment back to the Planner with the
        reservation intact; only an explicit movement releases it. The one exception is a Stores
        return, where the wireframe is explicit that the outbound key is cancelled and reserved
        stock goes back to free stock — so that one, and only that one, moves it. */
-    if(txn.step===8){
+    if(txn.step===7){
       scReleaseMaterial(txn,'Reservation released — outbound key cancelled on Stores return');
       txn.shipment.outboundKey='';txn.shipment.transferOrder='';
     }
@@ -1399,25 +1593,36 @@ function scConfirmSheet(){
        been sent back, and applying the forward stamp overwrote the Returned status set two lines
        above with Approved — which then made FR2.7's Returned → Modified transition impossible,
        because nothing was ever in Returned to move out of. */
-    scAdvance(txn,back,Object.assign({status:spec.returnStatus||'Returned',noStamp:true},opts));
+    /* Only claim "Returned" as the TRANSACTION status when the document being sent back actually
+       has that status. Shipment and Challan do not (Master Data section D), so a Stores or
+       Security return was putting a value on the header chip that the FRD never defines for that
+       document; FR8.6 and FR11.6 both name no status change on return. Falling through to
+       scAdvance instead lets the destination step's own status apply, which is the truth: the
+       shipment really is back at Created with the Planner. */
+    const backStatus=backDocReturns?(spec.returnStatus||'Returned'):(SC_STEP_SPEC[back]||{}).status;
+    scAdvance(txn,back,Object.assign({},opts,{status:backStatus,noStamp:true}));
   }else{
     /* Inventory movements and document minting that belong to a checker decision.
        The guard on the movement is not defensive noise: steps 9 and 11 both return to step 8, so
        Stores can legitimately release the same shipment twice, and an unguarded call wrote a
        second "Main → Staging" movement into the FR20 log claiming material had moved that had
        never gone back. The material is already staged; re-releasing re-confirms it. */
-    if(txn.step===8){
+    if(txn.step===7){
       if(txn.position!=='Staging')
         scMoveInventory(txn,'Staging','Goods issued against '+(txn.shipment.outboundKey||'outbound key'));
-      /* FR9.1 — the Delivery Note is PRODUCED BY the goods issue, not by its own approval. It was
-         minted at step 9's approve, so the DN approver opened a delivery note with no number and
-         no date to approve, and the number only appeared once they had approved it. */
-      if(!txn.dn.no){
-        txn.dn.no=scNextNo('dn');
-        txn.dn.date=scNow();
-        txn.dn.issuedBy=activePersonaId;
-      }
+      // FR8.5 — record who issued the goods and when. The DN itself is minted on arrival at step 9.
+      txn.shipment.issuedBy=activePersonaId;txn.shipment.issuedAt=scNow();
     }
+    // FR2.5 / FR5.4 / FR9.4 / FR12.3 / FR14.4 / FR15.3 all list "record <X> By" and "record <X>
+    // Date-Time" as obligations SEPARATE from "update the Activity Log", so the log row does not
+    // discharge them and each document needs its own stamp.
+    if(txn.step===2){txn.scr.approvedBy=activePersonaId;txn.scr.approvedAt=scNow();}
+    if(txn.step===5){txn.po.approvedBy=activePersonaId;txn.po.approvedAt=scNow();}
+    if(txn.step===9){txn.dn.approvedBy=activePersonaId;txn.dn.approvedAt=scNow();}
+    if(txn.step===12){txn.shipment.confirmedBy=activePersonaId;txn.shipment.confirmedAt=scNow();}
+    if(txn.step===14){txn.asn.clearedBy=activePersonaId;txn.asn.clearedAt=scNow();}
+    if(txn.step===15){txn.asn.gateEntryBy=activePersonaId;txn.asn.gateEntryAt=scNow();}
+    if(txn.step===17){txn.recon.confirmedBy=activePersonaId;txn.recon.confirmedAt=scNow();}
     if(txn.step===11){
       txn.challan.gateOutAt=scNow();                         // FR11.5 — return monitoring starts here
       /* FR11.5 — the gate pass is the document the vehicle physically leaves with, and the one
@@ -1431,12 +1636,18 @@ function scConfirmSheet(){
       txn.challan.dispatchConfirmedAt=scNow();
     }
     if(txn.step===12)scMoveInventory(txn,'At Vendor','Confirmed at vendor after gate outward');
-    if(txn.step===10&&!txn.challan.no){txn.challan.no=scNextNo('challan');txn.challan.date=scNow();}
+    // FR10.4 — "generate a unique Challan No.; record Generated By and Generated Date-Time".
+    if(txn.step===10&&!txn.challan.no){
+      txn.challan.no=scNextNo('challan');
+      txn.challan.date=scNow();
+      txn.challan.generatedBy=activePersonaId;
+    }
     if(spec.next===0){
       // FR18.3 — closure cascades to four documents and deliberately leaves three alone.
       scApplyStamps(txn,txn.step);
       scCloseAll(txn);
       txn.closed=true;txn.status=spec.approveStatus||'Closed';txn.pendingWith='';
+      txn.closedBy=activePersonaId;txn.closedAt=scNow();          // FR18.2 — Closed By / Closure Date-Time
       scLog(txn,act.label+' — SCR, PO, Shipment and Challan closed',spec.status,txn.status,opts);scSave();
     }
     else scAdvance(txn,scNextStep(txn,txn.step),Object.assign({status:spec.approveStatus},opts));
@@ -1469,7 +1680,27 @@ function scConfirmShortClose(){
 function scSetReconLine(i,k,v){
   const txn=scOpenTxn();if(!txn)return;
   const row=(txn.scr.issueItems||[])[i];if(!row)return;
+  const prev=row[k];
+  /* FR17.5 — "The system shall validate that the Return Quantity does not exceed the available
+     unconsumed Issue Item balance." Nothing checked it, so a return larger than what was ever
+     issued drove `outstanding` negative and the FR17.7 gate could never be satisfied. */
+  if(k==='returnedQty'){
+    const consumed=+(Number(txn.recon.received||txn.imr.receivedQty||0)*Number(row.ratio||0)).toFixed(3);
+    const free=+Math.max(0,Number(row.qty||0)-consumed-Number(row.scrapQty||0)).toFixed(3);
+    if(Number(v||0)>free){
+      txn.recon.lineErr='Return quantity for '+row.item+' cannot exceed the unconsumed balance of '+free+'.';
+      renderADTPage();return;
+    }
+  }
+  delete txn.recon.lineErr;
   row[k]=v;
+  // FR17.5 closes its on-receipt list with "the Activity Log shall be updated". These entries
+  // move `outstanding`, which is what the closure gate reads, so they cannot go unrecorded.
+  if(String(prev||'')!==String(v||''))
+    scLog(txn,'Reconciliation updated — '+row.item+' · '+k,txn.status,txn.status,
+      {oldValue:String(prev||0),newValue:String(v||0),
+       reasonSet:k==='returnedQty'?'RC-BALRET':(k==='scrapQty'?'RC-SCRAP':''),
+       reasonCode:(k==='returnedQty'?row.returnReason:row.scrapReason)||''});
   scSave();renderADTPage();
 }
 // -- Continue as: step into whoever the transaction is now pending with, without going through
@@ -1520,6 +1751,22 @@ function scSetIssue(i,k,v){
   const row=(txn.scr.issueItems||[])[i];if(!row)return;
   row[k]=v;
   if(k==='warehouse')row.location='';
+  /* FR1.6 — three columns the FRD marks as system-derived and that nothing was deriving:
+       Tax Code               "Read-only / Auto-populated … Derived from applicable configuration"
+       WIP Adjustment Required "Read-only Yes / No | System | Indicates whether WIP stock
+                                adjustment is required"
+       Storage Zone            "Default from Sub-Contracting configuration"
+     The masters for all three already existed and simply had no consumer. */
+  if(k==='item'){
+    const it=scItem(v);
+    row.tax=it?(it.tax||''):'';
+    row.wipAdjust=(txn.scr.base==='Production Order'&&it&&/WIP/i.test(it.kind||''))?'Yes':'No';
+    if(row.wipAdjust==='No')row.adjustmentOrder='';
+  }
+  if((k==='warehouse'||k==='location')&&!row.zone){
+    const z=(scMaster.zones||[]).find(function(x){return x.warehouse===row.warehouse;});
+    if(z)row.zone=z.code||z.name||'';
+  }
   // BOM ratio = issue qty ÷ expected receivable qty (FR3.4).
   const recv=Number(txn.scr.recvQty||0);
   if(recv>0&&Number(row.qty)>0)row.ratio=(Number(row.qty)/recv).toFixed(3);
@@ -1580,6 +1827,7 @@ function buildScTilesHTML(){
 }
 function scDashFilter(no){scDashStepFilter=(scDashStepFilter===no?0:no);renderADTPage();}
 function scDashClear(){scDashStepFilter=0;renderADTPage();}
+function scDashToggleClosed(){scDashClosed=!scDashClosed;scDashStepFilter=0;renderADTPage();}
 
 function buildScDashboardHTML(){
   scSeed();
@@ -1594,7 +1842,11 @@ function buildScDashboardHTML(){
     const b=t.createdIso?new Date(t.createdIso).getTime():0;
     return Math.max(a,b);
   };
-  const all=scMyTxns(me).filter(function(t){return !t.closed;}).slice().sort(function(x,y){
+  /* FR2.9 requires a rejected SCR to be "retained for audit and reporting", and FR18 closes
+     transactions rather than deleting them — but this board was the only way into a transaction
+     and it hard-filtered every closed record out, so a rejected or closed SCR became unreachable
+     the moment it terminated. The data was always there; nothing could open it. */
+  const all=scMyTxns(me).filter(function(t){return scDashClosed?!!t.closed:!t.closed;}).slice().sort(function(x,y){
     const mineX=x.pendingWith===me?0:1,mineY=y.pendingWith===me?0:1;
     if(mineX!==mineY)return mineX-mineY;
     return stamp(y)-stamp(x);
@@ -1670,9 +1922,15 @@ function buildScDashboardHTML(){
     +banner
     +'<div class="sc-dash-head">'
       +'<div><p class="sc-h1">'+scEsc(actor.name)+' <span class="sc-role">'+scEsc(actor.label.toUpperCase())+'</span></p>'
-      +'<p class="sc-h2">You are looking after '+all.length+' piece'+(all.length===1?'':'s')+' of work'
-      +(mine.length?', '+mine.length+' waiting on you.':'. Nothing is waiting on you right now.')+'</p></div>'
-      +(scActorOwnsStep(me,1)?'<button class="btn btn-primary btn-sm" onclick="scStartNew()">+ New SCR</button>':'')
+      +'<p class="sc-h2">'+(scDashClosed
+        ?all.length+' closed or rejected transaction'+(all.length===1?'':'s')+', retained for audit. Open one to read its record and activity log.'
+        :'You are looking after '+all.length+' piece'+(all.length===1?'':'s')+' of work'
+          +(mine.length?', '+mine.length+' waiting on you.':'. Nothing is waiting on you right now.'))+'</p></div>'
+      +'<div style="display:flex;gap:8px;align-items:center">'
+      +'<button class="btn btn-secondary btn-sm" onclick="scDashToggleClosed()">'
+        +(scDashClosed?'← Open transactions':'Closed / Rejected')+'</button>'
+      +(scActorOwnsStep(me,1)&&!scDashClosed?'<button class="btn btn-primary btn-sm" onclick="scStartNew()">+ New SCR</button>':'')
+      +'</div>'
     +'</div>'
     +buildScTilesHTML()
     +(scDashStepFilter?'<div class="sc-filter-note">Showing <b>'+scEsc(stepName)+'</b> only <button class="cfg-cat-clear" onclick="scDashClear()">Clear</button></div>'
@@ -1767,15 +2025,24 @@ function scItemsHTML(txn){
         +scMaster.warehouses.map(function(w){return '<option value="'+w.code+'"'+(r.warehouse===w.code?' selected':'')+'>'+scEsc(w.code)+'</option>';}).join('')+'</select></td>'
       +'<td><select class="ep-form-select" onchange="scSetIssue('+i+',\'location\',this.value)"><option value="">…</option>'
         +((wh&&wh.locations)||[]).map(function(l){return '<option value="'+l.code+'"'+(r.location===l.code?' selected':'')+'>'+scEsc(l.code)+'</option>';}).join('')+'</select></td>'
+      +'<td>'+scEsc(r.zone||'—')+'</td>'
       +'<td>'+scEsc(r.ratio||'—')+'</td>'
+      +'<td>'+scEsc(r.tax||(it?it.tax:'')||'—')+'</td>'
+      // FR1.6 — WIP Adjustment Required is system-derived; the Adjustment Order Reference beside
+      // it is mandatory whenever it reads Yes, which is what blocks FR7.3's shipment submission.
+      +'<td>'+(r.wipAdjust==='Yes'?scChip('Yes','amber'):'<span class="sc-dim">No</span>')+'</td>'
+      +'<td>'+(r.wipAdjust==='Yes'
+        ?'<input class="ep-form-input" style="width:120px" placeholder="Adj. order ref." value="'+scEsc(r.adjustmentOrder||'')+'" onchange="scSetIssue('+i+',\'adjustmentOrder\',this.value)">'
+        :'<span class="sc-dim">—</span>')+'</td>'
       +'<td>'+scEsc(it?it.hsn:'—')+'</td>'
       +'<td><button class="ep-cancel-btn" style="padding:3px 8px" onclick="scRemoveIssue('+i+')">Remove</button></td></tr>';
   }).join('');
   const issue='<div class="sc-sec"><div class="sc-sec-h">Issue Item Details</div>'
     +(err.issueItems?'<div class="sc-err-msg" style="margin-bottom:8px">'+scEsc(err.issueItems)+'</div>':'')
-    +'<div class="listing-card" style="margin-bottom:10px"><table class="lp-table sc-table" style="min-width:900px"><thead><tr>'
-    +'<th>#</th><th>Issue Item</th><th>Type</th><th>Qty</th><th>UOM</th><th>Warehouse</th><th>Storage Loc.</th><th>BOM Ratio</th><th>HSN</th><th></th>'
-    +'</tr></thead><tbody>'+(rows||'<tr><td colspan="10" style="color:var(--gray);text-align:center;padding:16px">No issue items yet.</td></tr>')+'</tbody></table></div>'
+    +'<div class="listing-card" style="margin-bottom:10px"><table class="lp-table sc-table" style="min-width:1180px"><thead><tr>'
+    +'<th>#</th><th>Issue Item</th><th>Type</th><th>Qty</th><th>UOM</th><th>Warehouse</th><th>Storage Loc.</th><th>Zone</th>'
+    +'<th>BOM Ratio</th><th>Tax Code</th><th>WIP Adj.</th><th>Adj. Order Ref.</th><th>HSN</th><th></th>'
+    +'</tr></thead><tbody>'+(rows||'<tr><td colspan="14" style="color:var(--gray);text-align:center;padding:16px">No issue items yet.</td></tr>')+'</tbody></table></div>'
     +'<button class="btn btn-secondary btn-sm" onclick="scAddIssueItem()">+ Add Issue Item</button>'
     +'<div class="sc-help" style="margin-top:8px">BOM ratio is derived as issue quantity ÷ expected receivable quantity.</div>'
     +'</div>';
@@ -1867,7 +2134,13 @@ function scSummaryHTML(txn){
       +scRow('Rate Contract',scEsc(txn.po.rateContract))+scRow('Price / Unit',scEsc(txn.po.price))
       +scRow('Price Basis',scEsc(txn.po.basis))+scRow('Currency',scEsc(txn.po.currency))
       +scRow('Payment Terms',scEsc(txn.po.paymentTerms))
+      // FR5.1 requires the approver to see "the complete PO information captured under FR4"; these
+      // three are mandatory on the PO and were absent from the screen the approver decides on.
+      +scRow('Purchase Office',scEsc((scMaster.purchaseOffices.find(function(p){return p.code===txn.po.purchaseOffice;})||{}).name||txn.po.purchaseOffice))
+      +scRow('PO Series',scEsc(txn.po.poSeries))
+      +scRow('Expected Receipt Date',scEsc(txn.po.expectedReceipt))
       +scRow('PO Value',s.billable==='No'?'0.00 — non-billable':scMoney(Number(txn.po.price||0)*Number(s.recvQty||0)))
+      +scRow('Approved By',scEsc(txn.po.approvedBy?scActorLabel(txn.po.approvedBy)+' · '+(txn.po.approvedAt||''):(scDocStatus(txn,'po')==='Approved'?'System (zero value)':'Not yet approved')))
       +'</div></div>';
   }
   if(txn.shipment&&txn.shipment.no){
@@ -1881,12 +2154,22 @@ function scSummaryHTML(txn){
   if(txn.asn&&txn.asn.no){
     h+='<div class="sc-sec"><div class="sc-sec-h">Advance Shipping Notice</div><div class="sc-kv-grid">'
       +scRow('ASN No.',scEsc(txn.asn.no))+scRow('Quantity Ready',scEsc(txn.asn.qtyReady))
-      +scRow('Expected Dispatch',scEsc(txn.asn.dispatchDate))+scRow('Inspection Document',scEsc(txn.asn.inspectionDoc))+'</div></div>';
+      +scRow('Expected Dispatch',scEsc(txn.asn.dispatchDate))
+      // Bound to the real attachment store. `asn.inspectionDoc` was written nowhere in the file,
+      // so this row rendered an em-dash for every transaction that ever existed.
+      +scRow('Inspection Documents',(txn.asn.docs||[]).length
+        ?scEsc((txn.asn.docs||[]).map(function(d){return d.name;}).join(', ')):'')
+      +scRow('QC Cleared By',scEsc(txn.asn.clearedBy?scActorLabel(txn.asn.clearedBy)+' · '+(txn.asn.clearedAt||''):''))
+      +'</div></div>';
   }
   if(txn.imr&&txn.imr.no){
     h+='<div class="sc-sec"><div class="sc-sec-h">Material Receipt</div><div class="sc-kv-grid">'
       +scRow('IMR No.',scEsc(txn.imr.no))+scRow('Received Quantity',scEsc(txn.imr.receivedQty))
-      +scRow('Lot / Serial',scEsc(txn.imr.lot))+scRow('Receiving Location',scEsc(txn.imr.receivingLocation))+'</div></div>';
+      +scRow('Lot / Serial',scEsc(txn.imr.lot))+scRow('Receiving Location',scEsc(txn.imr.receivingLocation))
+      +scRow('Received By',scEsc(txn.imr.receivedBy?scActorLabel(txn.imr.receivedBy):''))
+      +scRow('Receipt Date-Time',scEsc(txn.imr.receiptAt))
+      +scRow('Receivable Line Status',scChip(scLineStatus(txn),scStatusTone(scLineStatus(txn))))
+      +'</div></div>';
   }
   if(txn.step>=17)h+=scReconHTML(txn);
   return h;
@@ -1927,8 +2210,15 @@ function scReconHTML(txn){
     // Scrap Reason and recommends RC-SCRAP whenever scrap > 0. Both are captured per line.
     const reasonCell=(edit&&(ret>0||scr>0))
       ?'<div class="sc-recon-reasons">'
-        +(ret>0?'<select class="ep-form-select" onchange="scSetReconLine('+i+',\'returnReason\',this.value)"><option value="">Return reason…</option>'
-          +scReasonSet('RC-BALRET').values.map(function(o){return '<option value="'+o.code+'"'+(r.returnReason===o.code?' selected':'')+'>'+scEsc(o.text)+'</option>';}).join('')+'</select>':'')
+        // FR17.5 marks Return Reason mandatory (a table row, not a review note), so it carries the
+        // same error styling as the scrap reason, and the receiving storage location beside it is
+        // mandatory too — returned material has to be booked back into somewhere.
+        +(ret>0?'<select class="ep-form-select'+(r.returnReason?'':' sc-err')+'" onchange="scSetReconLine('+i+',\'returnReason\',this.value)"><option value="">Return reason…</option>'
+          +scReasonSet('RC-BALRET').values.map(function(o){return '<option value="'+o.code+'"'+(r.returnReason===o.code?' selected':'')+'>'+scEsc(o.text)+'</option>';}).join('')+'</select>'
+          +'<select class="ep-form-select'+(r.returnLocation?'':' sc-err')+'" onchange="scSetReconLine('+i+',\'returnLocation\',this.value)"><option value="">Receiving storage location…</option>'
+          +(function(){const out=[];scMaster.warehouses.forEach(function(w){(w.locations||[]).forEach(function(l){
+             out.push('<option value="'+w.code+'/'+l.code+'"'+(r.returnLocation===w.code+'/'+l.code?' selected':'')+'>'+scEsc(w.code+' / '+l.code)+'</option>');});});return out.join('');})()
+          +'</select>':'')
         +(scr>0?'<select class="ep-form-select'+(r.scrapReason?'':' sc-err')+'" onchange="scSetReconLine('+i+',\'scrapReason\',this.value)"><option value="">Scrap reason…</option>'
           +scReasonSet('RC-SCRAP').values.map(function(o){return '<option value="'+o.code+'"'+(r.scrapReason===o.code?' selected':'')+'>'+scEsc(o.text)+'</option>';}).join('')+'</select>':'')
         +'</div>'
@@ -1981,12 +2271,17 @@ function scComputeRecon(txn){
      received, and the gate then does its job. */
   const expected=Number(s.recvQty||0),received=Number(txn.imr.receivedQty||0);
   const shortClosed=Number(txn.recon.shortClosed||0);
-  let issued=0,consumed=0,returned=0,scrap=0,missing=false;
+  let issued=0,consumed=0,returned=0,scrap=0,missing=false,returnMissing=false,returnMissingLoc=false;
   (s.issueItems||[]).forEach(function(r){
     const iq=Number(r.qty||0),ratio=Number(r.ratio||0);
     issued+=iq;consumed+=+(received*ratio).toFixed(3);
     returned+=Number(r.returnedQty||0);scrap+=Number(r.scrapQty||0);
     if(Number(r.scrapQty||0)>0&&!r.scrapReason)missing=true;
+    // FR17.5 — Return Quantity, Receiving Storage Location and Return Reason are all Mandatory.
+    if(Number(r.returnedQty||0)>0){
+      if(!r.returnReason)returnMissing=true;
+      if(!r.returnLocation)returnMissingLoc=true;
+    }
   });
   txn.recon.expected=expected;txn.recon.received=received;
   txn.recon.pending=Math.max(0,expected-received-shortClosed);
@@ -1994,14 +2289,32 @@ function scComputeRecon(txn){
   txn.recon.returned=returned;txn.recon.scrap=scrap;
   txn.recon.outstanding=+(issued-consumed-returned-scrap).toFixed(3);
   txn.recon.scrapMissingReason=missing;
+  txn.recon.returnMissingReason=returnMissing;
+  txn.recon.returnMissingLocation=returnMissingLoc;
   return txn.recon;
 }
 function scGateBlock(txn){
+  /* FR8.3 — "Reserved Quantity < Shipment Quantity → Goods Issue blocked". This was rendered as
+     a chip and never enforced, so the release button could not fail the one check the FRD makes
+     its gate. Enforced here, which is where scConfirmSheet consults before any forward action. */
+  if(txn.step===7){
+    const short=(txn.scr.issueItems||[]).filter(function(r){return scReservedFor(txn,r)<Number(r.qty||0);});
+    if(short.length)return 'Reserved quantity is short for '+short.map(function(r){return r.item;}).join(', ')
+      +'. FR8.3 blocks goods issue until reserved quantity equals shipment quantity.';
+  }
+  // FR14.4 — "Before clearance, the system shall validate: required inspection documents are
+  // available". The screen already SAID this in red; nothing stopped Clear ASN.
+  if(txn.step===14&&!((txn.asn.docs||[]).length))
+    return 'Inspection documents must be attached before the ASN can be cleared. Return the ASN to the vendor.';
   if(txn.step===17){
     scComputeRecon(txn);
     if(Number(txn.recon.pending||0)>0)return 'Pending receivable must be nil or short-closed before full receipt can be confirmed.';
     if(Number(txn.recon.outstanding||0)!==0)return 'All issue material must be accounted for — outstanding is '+txn.recon.outstanding+'.';
     if(txn.recon.scrapMissingReason)return 'Every scrap quantity needs a reason before full receipt can be confirmed.';
+    // FR17.5 marks Return Reason and Receiving Storage Location mandatory in its field table —
+    // only the scrap reason was ever checked, so a return could be booked with neither.
+    if(txn.recon.returnMissingReason)return 'Every returned issue quantity needs a return reason before full receipt can be confirmed.';
+    if(txn.recon.returnMissingLocation)return 'Every returned issue quantity needs a receiving storage location.';
   }
   return '';
 }
@@ -2043,10 +2356,25 @@ function scHolds(item,warehouse,location,exceptTxn){
   });
   return held;
 }
+/* Receipts ADD to a bin the way holds subtract from one. FR16 requires the confirmed receivable
+   quantity to land in the selected receiving location — "the applicable inventory quantity shall
+   be updated" — and nothing was doing it: the IMR moved a position string and scMaster.stock was
+   read but never written, so the receivable never existed as stock anywhere. Held on the
+   transaction for the same reason reservations are: master data is not persisted, and a receipt
+   belongs to the transaction that booked it. */
+function scReceipts(item,warehouse,location){
+  let got=0;
+  scState.txns.forEach(function(t){
+    (t.receipts||[]).forEach(function(r){
+      if(r.item===item&&r.warehouse===warehouse&&(!location||r.location===location))got+=Number(r.qty||0);
+    });
+  });
+  return got;
+}
 function scAvail(item,warehouse,location,exceptTxn){
   const r=scMaster.stock.find(function(x){return x.item===item&&x.warehouse===warehouse&&(!location||x.location===location);});
   const base=r?r.free:0;
-  return Math.max(0,base-scHolds(item,warehouse,location,exceptTxn));
+  return Math.max(0,base+scReceipts(item,warehouse,location)-scHolds(item,warehouse,location,exceptTxn));
 }
 function scReserveMaterial(txn){
   txn.reservations=(txn.scr.issueItems||[]).map(function(r){
@@ -2057,6 +2385,47 @@ function scReserveMaterial(txn){
 function scReleaseMaterial(txn,note){
   txn.reservations=[];
   scMoveInventory(txn,'Main',note||'Reservation released');
+}
+/* == FR16.4 / FR17.4 — WHAT A CONFIRMED RECEIPT ACTUALLY DOES TO INVENTORY ==================
+   Three obligations the FRD states as system behaviour and that nothing was performing:
+     FR16   "the confirmed Receivable Quantity shall be added to the selected Receiving / Store
+             Location; the applicable inventory quantity shall be updated"
+     FR16   "where the Receivable Product / WIP was newly created and pending, it shall become
+             Active" after the first confirmed receipt
+     FR17.4 "reduce / consume the corresponding Issue Item quantity from the Sub-Contracting /
+             At Vendor inventory position", Consumed = Received × BOM Ratio
+   The consumption figure was being computed for display and for the FR17.7 gate, but the issue
+   material it describes was never actually drawn down. == */
+function scReceiveMaterial(txn,receivedQty){
+  const qty=Number(receivedQty||0);
+  const loc=String(txn.imr.receivingLocation||txn.scr.recvWarehouse||'');
+  const parts=loc.split('/');
+  const wh=(parts[0]||txn.scr.recvWarehouse||'').trim(),bin=(parts[1]||'').trim();
+  txn.receipts=txn.receipts||[];
+  if(qty>0){
+    txn.receipts.push({item:txn.scr.recvItem,warehouse:wh,location:bin,qty:qty,at:scNow()});
+    scLog(txn,'Inventory updated — '+qty+' '+scEsc(txn.scr.recvItem)+' booked into '+(loc||wh),
+      txn.status,txn.status,{by:'System',role:'Automated',source:'System',newValue:String(qty)});
+  }
+  // FR3.2 / FR16 — a system-created product is Pending until the first confirmed receipt.
+  if(txn.product&&txn.product.created&&txn.product.status==='Pending'&&qty>0){
+    txn.product.status='Active';
+    scLog(txn,'Receivable product '+txn.product.code+' activated on first confirmed receipt',
+      'Pending','Active',{by:'System',role:'Automated',source:'System'});
+  }
+  // FR17.4 — draw the issue material down against the BOM ratio.
+  (txn.reservations||[]).forEach(function(r){
+    const line=(txn.scr.issueItems||[]).find(function(i){return i.item===r.item;});
+    const ratio=Number((line&&line.ratio)||0);
+    if(!ratio)return;
+    const used=Math.min(Number(r.qty||0),+(qty*ratio).toFixed(3));
+    r.consumed=+((Number(r.consumed||0))+used).toFixed(3);
+    r.qty=+Math.max(0,Number(r.qty||0)-used).toFixed(3);
+    scLog(txn,'Issue material consumed — '+used+' '+r.item+' against BOM ratio '+ratio,
+      txn.status,txn.status,{by:'System',role:'Automated',source:'System',
+        oldValue:String(+(r.qty+used).toFixed(3)),newValue:String(r.qty)});
+  });
+  scMoveInventory(txn,'Returned to Store','Receivable booked into '+(loc||'store'));
 }
 function scPanelTable(head,rows,minW){
   return '<div class="listing-card" style="margin-bottom:10px"><table class="lp-table sc-table"'
@@ -2114,7 +2483,18 @@ function scPanel6(txn){
       :'<div class="sc-warn green"><b>Material is available.</b><br>Submitting reserves these quantities against this shipment and moves them to the Reserved location. No physical movement happens at this stage.</div>')
     +'<div class="sc-help">Stock reserved for another transaction is not counted as available.</div></div>';
 }
+/* FR7.3's block table has six rows; five were enforced and this one had neither a field nor a
+   check behind it: "WIP Adjustment required but Adjustment Order Reference missing → Submission
+   blocked". The flag is derived on the issue line in scSetIssue. */
+function scWipBlocked(txn){
+  const bad=(txn.scr.issueItems||[]).filter(function(r){
+    return r.wipAdjust==='Yes'&&!String(r.adjustmentOrder||'').trim();});
+  return bad.length?('WIP adjustment is required for '+bad.map(function(r){return r.item;}).join(', ')
+    +' — an Adjustment Order Reference is mandatory before the shipment can be submitted.'):'';
+}
 function scShipmentBlocked(txn){
+  const wip=scWipBlocked(txn);
+  if(wip)return wip;
   const rows=txn.scr.issueItems||[];
   if(!rows.length)return 'No issue items on the SCR.';
   for(let i=0;i<rows.length;i++){
@@ -2127,13 +2507,24 @@ function scShipmentBlocked(txn){
 }
 /* FR7.4 / FR8.2 — the Outbound Key is the Stores pick list, and FR8.3's core validation is
    reserved quantity = shipment quantity. Both are shown as the storesperson sees them. */
+/* FR8.3's core validation is Reserved Quantity = Shipment Quantity, with Goods Issue BLOCKED when
+   reserved is short. The Reserved column used to re-print the shipment quantity and the verdict
+   was the literal string "Matched", so the one check that gates goods issue could never fail —
+   and a record whose reservations had been released on a Stores return still showed every line
+   fully reserved. Both the column and the chip now read the real hold. */
+function scReservedFor(txn,row){
+  return (txn.reservations||[]).filter(function(r){
+    return r.item===row.item&&r.warehouse===row.warehouse&&r.location===row.location;
+  }).reduce(function(a,r){return a+Number(r.qty||0);},0);
+}
 function scPanel8(txn){
   const sh=txn.shipment;
   const rows=(txn.scr.issueItems||[]).map(function(r){
-    const it=scItem(r.item);
+    const it=scItem(r.item),need=Number(r.qty||0),res=scReservedFor(txn,r);
     return '<tr><td><b>'+scEsc(r.item)+'</b><div class="sc-sub">'+scEsc(it?it.name:'')+'</div></td>'
       +'<td>'+scEsc(r.qty)+' '+scEsc(it?it.uom:'')+'</td><td>'+scEsc(r.warehouse)+'</td><td>'+scEsc(r.location)+'</td>'
-      +'<td>'+scEsc(r.qty)+'</td><td>'+scChip('Matched','green')+'</td></tr>';
+      +'<td>'+res+'</td><td>'+(res>=need?scChip('Matched','green')
+        :scChip(res?'Short by '+(need-res):'Not reserved','red'))+'</td></tr>';
   }).join('');
   return '<div class="sc-sec"><div class="sc-sec-h">Outbound Key · pick list</div>'
     +'<div class="sc-kv-grid" style="margin-bottom:12px">'
@@ -2163,7 +2554,11 @@ function scPanelDoc(txn,kind){
          and two people opening the same challan on different days saw different dates on what is
          supposed to be one immutable document. It is stamped once, where the number is minted. */
       +scRow('Date',scEsc(String((isCh?txn.challan.date:txn.dn.date)||'').split(',')[0]||'—'))
-      +(isCh?scRow('Challan Type',scEsc(sh.challanType)):scRow('Approver',scEsc(scActorLabel('dn-approver'))))
+      // The approver named ON THE SHIPMENT (FR7's dnApprover), not a hardcoded role label — and,
+      // once approved, FR9.4's Approved By / Approved Date and Time on the document itself.
+      +(isCh?scRow('Challan Type',scEsc(sh.challanType))+scRow('Generated By',scEsc(txn.challan.generatedBy?scActorLabel(txn.challan.generatedBy):'—'))
+            :scRow('Approver',scEsc(scActorLabel(sh.dnApprover||'dn-approver')))
+             +scRow('Approved By',scEsc(txn.dn.approvedBy?scActorLabel(txn.dn.approvedBy)+' · '+(txn.dn.approvedAt||''):'Not yet approved')))
       +scRow('Dispatching Unit',scEsc(loc?loc.name:''))
       +scRow('Consignee',scEsc(v?v.name:s.internalBP))
       +scRow('Consignee Address',scEsc(v&&(v.addresses.find(function(a){return a.code===s.vendorAddress;})||{}).text))
@@ -2229,6 +2624,12 @@ function scPanel15(txn){
   return '<div class="sc-sec"><div class="sc-sec-h">Gate inward</div><div class="sc-kv-grid">'
     +scRow('ASN No.',scEsc(txn.asn.no))+scRow('ASN Status',scChip(txn.status,'green'))
     +scRow('Quantity Ready',scEsc(txn.asn.qtyReady))+scRow('Challan No.',scEsc(txn.challan.no))
+    // FR15.2 sources these two "from QC Clearance" — Security decides on them, so they cannot be
+    // left to the activity log.
+    +scRow('QC Cleared By',scEsc(txn.asn.clearedBy?scActorLabel(txn.asn.clearedBy):'—'))
+    +scRow('QC Cleared Date-Time',scEsc(txn.asn.clearedAt||'—'))
+    +scRow('Gate Entry Date-Time',scEsc(txn.asn.gateEntryAt||'Recorded on confirmation'))
+    +scRow('Security User',scEsc(txn.asn.gateEntryBy?scActorLabel(txn.asn.gateEntryBy):'—'))
     +'</div><div class="sc-warn blue"><b>Gate entry records physical inward only.</b><br>No inventory movement happens here — stock updates when Stores confirms the receipt.</div></div>';
 }
 /* FR1.2 / FR13.2 — attachments on the SCR and inspection documents on the ASN. A mockup cannot
@@ -2274,9 +2675,16 @@ function scStepPanel(txn){
   if(txn.step===1)return scAttachmentsHTML(txn,'scr',mine);
   if(txn.step===13)return scAttachmentsHTML(txn,'asn',mine);
   if(txn.step===14)return scAttachmentsHTML(txn,'asn',false)+scPanelAsnReview(txn);
+  /* FR2.1 lists Attachments in the read-only bundle the approver must see, and RC-SCRRET's
+     SCRR-08 is literally "Mandatory Information / Attachment Missing" — a reason the approver
+     could not check, because the attachments were rendered at step 1 and nowhere else. They are
+     part of the SCR's permanent record, so every downstream step shows them read-only. */
+  const scrAtt=(txn.scr.attachments||[]).length?scAttachmentsHTML(txn,'scr',false):'';
+  if(txn.step===2)return scrAtt;
   // The Buyer completes a PO against a product and BOM the system derived — show them both.
   if(txn.step===4)return scPanel3(txn);
-  const p={6:scPanel6,8:scPanel8,11:scPanel11,12:scPanel12,15:scPanel15}[txn.step];
+  // 7 is the goods issue (outbound key / pick list); 8 is logistics, which needs no extra panel.
+  const p={6:scPanel6,7:scPanel8,11:scPanel11,12:scPanel12,15:scPanel15}[txn.step];
   if(p)return p(txn);
   if(txn.step===9)return scPanelDoc(txn,'dn');
   if(txn.step===10)return scPanelDoc(txn,'challan');
