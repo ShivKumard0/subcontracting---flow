@@ -1611,6 +1611,11 @@ function scConfirmSheet(){
     const backDoc=act.id==='return-scr'?'scr':spec.doc;
     const backDocReturns=(SC_DOC_STATUSES[backDoc]||[]).indexOf('Returned')>-1;
     if(backDocReturns)scStampDoc(txn,backDoc,'Returned');
+    /* A document with no Returned status still has to go somewhere coherent. FR5.5 sends the PO
+       back for the Buyer to "correct only the PO/commercial information", which is the editable
+       state — and FR4.4 names that state Draft. Without this the header read Draft (from step 4's
+       spec) while the document trail still read Created, so the same PO showed two statuses. */
+    else if(backDoc==='po')scStampDoc(txn,'po','Draft');
     // toStep may be a function of (txn, sheet): FR9.5 and FR11.6 both route by reason code.
     const back=(typeof act.toStep==='function'?act.toStep(txn,scSheet):act.toStep)||spec.back||1;
     /* A return does NOT unwind the material. FR8.6 sends a shipment back to the Planner with the
