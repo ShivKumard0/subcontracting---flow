@@ -947,6 +947,55 @@ function scIsChecker(step){return scSpec(step).kind==='checker';}
    only when Billable = No, Internal BP only when Inter-Unit = Yes, the Project block only when
    SCR Base = Project. It takes the live form object and returns a boolean, so the rule sits
    beside the field it governs instead of in a render branch. == */
+/* == FR7.5 — THE LOGISTICS BLOCK, DECLARED ONCE AND USED TWICE ==============================
+   "The Shipment page shall contain a Logistics Arrangement section controlled by the Logistics
+   Required flag … The Planner MAY enter available logistics information during Shipment
+   preparation. AFTER Stores Outbound / Goods Issue, the authorized Logistics User shall COMPLETE
+   / CONFIRM the required Logistics information." (lines 868–880)
+
+   Two different things, and the FRD means both: the same fields appear on the shipment page at
+   creation, where they are OPTIONAL and the Planner fills in whatever is known, and again at the
+   logistics step after goods issue, where they are MANDATORY and the Logistics User completes
+   them. Both write to txn.shipment, so whatever the Planner pre-filled is already sitting in the
+   fields when the Logistics User opens it. One list, two levels of strictness. == */
+const SC_LOGISTICS_FIELDS=[
+  {id:'packageType',label:'Package Type / Details',type:'select',req:true,opts:[{v:'Wooden Box',t:'Wooden Box'},{v:'Pallet',t:'Pallet'},{v:'Crate',t:'Crate'},{v:'Loose',t:'Loose'}]},
+  {id:'packages',label:'Number of Packages',type:'num',req:true},
+  {id:'weight',label:'Package Weight',type:'num',req:true},
+  {id:'weightUom',label:'Weight UOM',type:'select',req:true,opts:[{v:'Kg',t:'Kg'},{v:'MT',t:'MT'}],def:'Kg'},
+  {id:'dispatchMode',label:'Mode of Dispatch',type:'select',req:true,opts:[{v:'Road',t:'Road'},{v:'Rail',t:'Rail'},{v:'Sea',t:'Sea'},{v:'Air',t:'Air'},{v:'Courier',t:'Courier'},{v:'Hand',t:'Hand'}]},
+  {id:'transporter',label:'Transporter',type:'text',ph:'Transporter name'},
+  /* FR7.5 — "Vehicle No. | Conditional | Required based on selected transport mode". It had
+     no req and no when, so Confirm Logistics passed with the vehicle blank and FR11's gate
+     check then compared the counted vehicle against an empty planned value. */
+  {id:'vehicle',label:'Vehicle No.',type:'text',ph:'MH12 AB 1234',req:true,
+   when:function(f){return ['Road','Rail'].indexOf(f.dispatchMode)>-1;},
+   help:'Mandatory for Road and Rail dispatch'},
+  {id:'driver',label:'Driver Details',type:'text',ph:'Name · contact'},
+  {id:'lr',label:'LR / Transport Reference No.',type:'text'},
+  {id:'lrDate',label:'LR / Transport Date',type:'date'},
+  {id:'insurance',label:'Insurance Applicable',type:'yesno',def:'No'},
+  {id:'insuredBy',label:'Insured By / Insurance Details',type:'text',when:function(f){return f.insurance==='Yes';},help:'Mandatory when Insurance Applicable = Yes',req:true},
+  {id:'contact',label:'Loading / Unloading Contact',type:'text'}
+];
+function scLogisticsFields(mandatory){
+  return SC_LOGISTICS_FIELDS.map(function(f){
+    const c=Object.assign({},f);
+    if(mandatory)return c;
+    // FR7.5's Planner pass: nothing is required yet, and the whole block hides when the shipment
+    // is not going through logistics at all (FR7.5 "Logistics Required = No → fields shall not be
+    // required, logistics processing shall be skipped").
+    delete c.req;
+    const inner=f.when;
+    c.when=function(fm,t){
+      const on=(fm.logistics!==undefined&&fm.logistics!=='')?fm.logistics:(t?(t.scr.logistics||'Yes'):'Yes');
+      if(on!=='Yes')return false;
+      return inner?inner(fm,t):true;
+    };
+    c.help='Optional now — the Logistics User completes this after goods issue';
+    return c;
+  });
+}
 const SC_FORMS={
   1:[
     {section:'SCR Header Details',fields:[
@@ -1070,27 +1119,11 @@ const SC_FORMS={
       {id:'expectedReturn',label:'Expected Date of Return',type:'date',req:true,future:true,help:'Must be a future date'},
       {id:'reference',label:'Your / Our Reference',type:'text',ph:'Optional'},
       {id:'remarks',label:'Remarks',type:'textarea',ph:'Optional',max:500}
-    ]}],
-  8:[{section:'Logistics Arrangement',fields:[
-      {id:'packageType',label:'Package Type / Details',type:'select',req:true,opts:[{v:'Wooden Box',t:'Wooden Box'},{v:'Pallet',t:'Pallet'},{v:'Crate',t:'Crate'},{v:'Loose',t:'Loose'}]},
-      {id:'packages',label:'Number of Packages',type:'num',req:true},
-      {id:'weight',label:'Package Weight',type:'num',req:true},
-      {id:'weightUom',label:'Weight UOM',type:'select',req:true,opts:[{v:'Kg',t:'Kg'},{v:'MT',t:'MT'}],def:'Kg'},
-      {id:'dispatchMode',label:'Mode of Dispatch',type:'select',req:true,opts:[{v:'Road',t:'Road'},{v:'Rail',t:'Rail'},{v:'Sea',t:'Sea'},{v:'Air',t:'Air'},{v:'Courier',t:'Courier'},{v:'Hand',t:'Hand'}]},
-      {id:'transporter',label:'Transporter',type:'text',ph:'Transporter name'},
-      /* FR7.5 — "Vehicle No. | Conditional | Required based on selected transport mode". It had
-         no req and no when, so Confirm Logistics passed with the vehicle blank and FR11's gate
-         check then compared the counted vehicle against an empty planned value. */
-      {id:'vehicle',label:'Vehicle No.',type:'text',ph:'MH12 AB 1234',req:true,
-       when:function(f){return ['Road','Rail'].indexOf(f.dispatchMode)>-1;},
-       help:'Mandatory for Road and Rail dispatch'},
-      {id:'driver',label:'Driver Details',type:'text',ph:'Name · contact'},
-      {id:'lr',label:'LR / Transport Reference No.',type:'text'},
-      {id:'lrDate',label:'LR / Transport Date',type:'date'},
-      {id:'insurance',label:'Insurance Applicable',type:'yesno',def:'No'},
-      {id:'insuredBy',label:'Insured By / Insurance Details',type:'text',when:function(f){return f.insurance==='Yes';},help:'Mandatory when Insurance Applicable = Yes',req:true},
-      {id:'contact',label:'Loading / Unloading Contact',type:'text'}
-    ]}],
+    ]},
+    // FR7.5 lines 878–879 — the section lives on the SHIPMENT page, and the Planner may fill in
+    // whatever is already known while preparing it. Optional here; completed after goods issue.
+    {section:'Logistics Arrangement · optional at this stage',fields:scLogisticsFields(false)}],
+  8:[{section:'Logistics Arrangement',fields:scLogisticsFields(true)}],
   13:[{section:'ASN Details',fields:[
       {id:'qtyReady',label:'Quantity Ready',type:'num',req:true,help:'Must be greater than zero and not exceed the open receivable quantity'},
       {id:'dispatchDate',label:'Expected Dispatch / Return Date',type:'date',req:true},
