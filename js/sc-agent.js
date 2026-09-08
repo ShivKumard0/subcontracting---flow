@@ -279,9 +279,22 @@ function scAgentHTML(){
 function scAgentRender(){
   const host=document.getElementById('sc-agent-panel');
   if(!host)return;
+  /* This rebuilds the whole panel, which destroys the input along with it. In a chat that is
+     felt immediately: you send a message and the caret is gone, so the next one needs a click
+     first. Carry the focus and any half-typed text across the rebuild. */
+  const old=document.getElementById('sca-q');
+  const hadFocus=!!(old&&document.activeElement===old);
+  const draft=old?old.value:'';
+
   host.innerHTML=scAgentHTML();
   const b=document.getElementById('sca-body');
   if(b)b.scrollTop=b.scrollHeight;
+
+  const now=document.getElementById('sca-q');
+  if(now){
+    if(draft)now.value=draft;
+    if(hadFocus)now.focus();
+  }
   const fab=document.getElementById('sc-agent-fab');
   if(fab)fab.classList.toggle('hidden',scAgentState.open);
   host.classList.toggle('open',scAgentState.open);
@@ -291,7 +304,16 @@ function scAgentToggle(){
   scAgentState.open=!scAgentState.open;
   scAgentRender();
   if(scAgentState.open){
-    const i=document.getElementById('sca-q');if(i)i.focus();
+    /* Focus AFTER the browser has applied `.open`. The panel is visibility:hidden until that
+       class lands, and an element inside a hidden subtree cannot take focus — calling focus()
+       synchronously here silently did nothing, so the panel opened with the caret nowhere and
+       you had to click the box before typing.
+       A timeout rather than requestAnimationFrame: rAF is tied to frame production and does not
+       fire dependably in a headless render, which made this fix untestable as well as unreliable. */
+    setTimeout(function(){
+      const i=document.getElementById('sca-q');
+      if(i&&scAgentState.open)i.focus();
+    },0);
     /* Context can change under an open panel — the user navigates, or switches persona. Polled
        rather than hooked, so the journey code has no idea this panel exists. */
     scAgentState.ctx=scAgentCtxLabel();
@@ -357,8 +379,14 @@ function scAgentMount(){
 '.sca-x{border:0;background:transparent;font-size:24px;line-height:1;color:var(--gray,#6a7282);cursor:pointer;padding:0 4px;border-radius:6px}',
 '.sca-x:hover{background:var(--ol,#f1f5f9);color:var(--navy,#0f172a)}',
 '.sca-tabs{display:flex;gap:6px;padding:10px 16px;border-bottom:1px solid var(--border,#e5e7eb);flex-shrink:0}',
+/* Every transition below names its properties. `transition:.15s` is shorthand for
+   `transition:all`, and the panel toggles visibility on open — so an `all` transition on a child
+   made the INHERITED visibility change animate rather than flip. The input stayed
+   visibility:hidden for the first half of the transition, and an element with computed
+   visibility hidden cannot take focus, so the caret never landed in the box. */
 '.sca-tab{flex:1;border:1px solid var(--border,#e5e7eb);background:var(--card,#fff);border-radius:8px;padding:7px 8px;',
-'  font-size:11.5px;font-weight:600;color:var(--gray,#6a7282);cursor:pointer;font-family:inherit;transition:.15s;',
+'  font-size:11.5px;font-weight:600;color:var(--gray,#6a7282);cursor:pointer;font-family:inherit;',
+'  transition:border-color .15s,color .15s,background .15s;',
 '  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
 '.sca-tab:hover{border-color:#cbd5e1;color:var(--navy,#0f172a)}',
 '.sca-tab.on{background:var(--navy,#0f172a);border-color:var(--navy,#0f172a);color:#fff}',
@@ -385,14 +413,16 @@ function scAgentMount(){
 '.sca-empty-b{font-size:12.5px;line-height:1.6;max-width:280px;margin:0 auto}',
 '.sca-chips{display:flex;gap:6px;padding:10px 16px 0;flex-wrap:wrap;flex-shrink:0}',
 '.sca-chip{border:1px solid var(--border,#e5e7eb);background:var(--card,#fff);border-radius:16px;padding:6px 11px;',
-'  font-size:11.5px;font-weight:500;color:var(--navy,#0f172a);cursor:pointer;font-family:inherit;transition:.15s}',
+'  font-size:11.5px;font-weight:500;color:var(--navy,#0f172a);cursor:pointer;font-family:inherit;',
+'  transition:border-color .15s,background .15s}',
 '.sca-chip:hover{border-color:var(--navy,#0f172a);background:var(--ol,#f1f5f9)}',
 '.sca-input{display:flex;gap:8px;align-items:center;padding:12px 16px 8px;flex-shrink:0}',
 '.sca-input input{flex:1;border:1px solid var(--border,#e5e7eb);border-radius:10px;padding:10px 12px;font-size:12.5px;',
-'  font-family:inherit;color:var(--navy,#0f172a);outline:none;transition:.15s;min-width:0}',
+'  font-family:inherit;color:var(--navy,#0f172a);outline:none;',
+'  transition:border-color .15s,box-shadow .15s;min-width:0}',
 '.sca-input input:focus{border-color:var(--navy,#0f172a);box-shadow:0 0 0 3px rgba(15,23,42,.07)}',
 '.sca-send{width:36px;height:36px;border-radius:10px;border:0;background:var(--navy,#0f172a);color:#fff;cursor:pointer;',
-'  display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:.15s}',
+'  display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:opacity .15s}',
 '.sca-send:hover{opacity:.86}',
 '.sca-foot{padding:0 16px 12px;font-size:10.5px;line-height:1.5;color:var(--gray,#6a7282)}',
 '@media (max-width:520px){#sc-agent-panel{width:100vw}}'
