@@ -2336,7 +2336,7 @@ function scGateBlock(txn){
      a chip and never enforced, so the release button could not fail the one check the FRD makes
      its gate. Enforced here, which is where scConfirmSheet consults before any forward action. */
   if(txn.step===7){
-    const short=(txn.scr.issueItems||[]).filter(function(r){return scReservedFor(txn,r)<Number(r.qty||0);});
+    const short=scShipLines(txn).filter(function(r){return scReservedFor(txn,r)<Number(r.qty||0);});
     if(short.length)return 'Reserved quantity is short for '+short.map(function(r){return r.item;}).join(', ')
       +'. FR8.3 blocks goods issue until reserved quantity equals shipment quantity.';
   }
@@ -2414,8 +2414,45 @@ function scAvail(item,warehouse,location,exceptTxn){
   const base=r?r.free:0;
   return Math.max(0,base+scReceipts(item,warehouse,location)-scHolds(item,warehouse,location,exceptTxn));
 }
+/* == FR6.2 — THE SHIPMENT'S OWN SOURCE LOCATION =============================================
+   "| Warehouse | Dropdown | Approved SCR | Yes | Source Warehouse |" and "| Storage Location |
+   Dropdown | Applicable Warehouse | Yes | Source location from which material is reserved |" —
+   both are DROPDOWNS the Planner works with on the shipment, defaulted from the approved SCR.
+   The only thing FR6.2 locks is the product itself: "The Planner shall not be allowed to change
+   the Product or approved Issue-to-Receivable/BOM relationship from the Shipment."
+
+   This mattered more than it looks. The availability check (FR6.3) blocks submission when the
+   named bin is empty — and with the source location fixed at whatever the SCR said, a Planner
+   whose SCR named an empty bin could neither submit nor correct it, and step 6 has no return
+   action. The transaction was stranded with no way forward. Picking a different source bin is
+   the remedy the FRD intends, and it is why these are dropdowns rather than read-only text.
+
+   Overrides live on the SHIPMENT, never on the approved SCR — FR5.4 makes the approved SCR
+   read-only, and the SCR's warehouse stays the record of what was approved. == */
+function scShipLine(txn,i){
+  const src=(txn.scr.issueItems||[])[i]||{};
+  const ov=((txn.shipment&&txn.shipment.lines)||[])[i]||{};
+  return {item:src.item,qty:Number(src.qty||0),ratio:src.ratio,
+    warehouse:ov.warehouse||src.warehouse||'',
+    location:ov.location||src.location||'',
+    moved:!!(ov.warehouse||ov.location)};
+}
+function scShipLines(txn){return (txn.scr.issueItems||[]).map(function(_,i){return scShipLine(txn,i);});}
+function scSetShipLine(i,k,v){
+  const txn=scOpenTxn();if(!txn)return;
+  if(scNotMine(txn))return;
+  txn.shipment.lines=txn.shipment.lines||[];
+  while(txn.shipment.lines.length<(txn.scr.issueItems||[]).length)txn.shipment.lines.push({});
+  const before=scShipLine(txn,i);
+  txn.shipment.lines[i][k]=v;
+  if(k==='warehouse')txn.shipment.lines[i].location='';   // locations belong to a warehouse
+  const after=scShipLine(txn,i);
+  scLog(txn,'Shipment source location changed — '+before.item,txn.status,txn.status,
+    {oldValue:before.warehouse+' / '+before.location,newValue:after.warehouse+' / '+after.location});
+  scSave();renderADTPage();
+}
 function scReserveMaterial(txn){
-  txn.reservations=(txn.scr.issueItems||[]).map(function(r){
+  txn.reservations=scShipLines(txn).map(function(r){
     return {item:r.item,warehouse:r.warehouse,location:r.location,qty:Number(r.qty||0)};
   });
   scMoveInventory(txn,'Reserved','Reserved '+txn.reservations.reduce(function(a,r){return a+r.qty;},0)+' against '+(txn.shipment.no||'shipment'));
@@ -2507,19 +2544,66 @@ function scPanel3(txn){
 /* FR6.2–6.4 — the availability check. Submission is blocked unless every line has enough free
    stock, and stock reserved for another transaction does not count as available. */
 function scPanel6(txn){
-  const rows=(txn.scr.issueItems||[]).map(function(r,i){
-    const it=scItem(r.item),need=Number(r.qty||0),have=scAvail(r.item,r.warehouse,r.location);
+  // FR6.2 — Warehouse and Storage Location are the Planner's to choose while the shipment is
+  // theirs; the product and quantity are not. Read-only once it has left step 6.
+  const edit=txn.step===6&&txn.pendingWith===activePersonaId&&!txn.closed;
+  const rows=scShipLines(txn).map(function(r,i){
+    const it=scItem(r.item),need=Number(r.qty||0),have=scAvail(r.item,r.warehouse,r.location,txn.id);
     const ok=have>=need&&need>0;
+    const wh=scWarehouse(r.warehouse);
+    const whCell=edit
+      ? '<select class="ep-form-select'+(ok?'':' sc-err')+'" onchange="scSetShipLine('+i+',\'warehouse\',this.value)">'
+        +'<option value="">Select…</option>'
+        +scMaster.warehouses.map(function(w){return '<option value="'+w.code+'"'+(r.warehouse===w.code?' selected':'')+'>'+scEsc(w.code)+'</option>';}).join('')
+        +'</select>'
+      : scEsc(r.warehouse);
+    const locCell=edit
+      ? '<select class="ep-form-select'+(ok?'':' sc-err')+'" onchange="scSetShipLine('+i+',\'location\',this.value)">'
+        +'<option value="">Select…</option>'
+        +(((wh&&wh.locations)||[]).map(function(l){
+            // Show what each bin actually holds, so choosing a source is an informed choice
+            // rather than trial and error against a red banner.
+            const a=scAvail(r.item,r.warehouse,l.code,txn.id);
+            return '<option value="'+l.code+'"'+(r.location===l.code?' selected':'')+'>'+scEsc(l.code)+' — '+a+' available</option>';
+          }).join(''))
+        +'</select>'
+      : scEsc(r.location);
     return '<tr><td>'+(i+1)+'</td><td><b>'+scEsc(r.item)+'</b><div class="sc-sub">'+scEsc(it?it.name:'')+'</div></td>'
-      +'<td>'+need+'</td><td>'+scEsc(it?it.uom:'')+'</td><td>'+scEsc(r.warehouse)+'</td><td>'+scEsc(r.location)+'</td>'
+      +'<td>'+need+'</td><td>'+scEsc(it?it.uom:'')+'</td><td>'+whCell+'</td><td>'+locCell+'</td>'
       +'<td>'+have+'</td><td>'+scChip(ok?'Available':(have===0?'No stock':'Short by '+(need-have)),ok?'green':'red')+'</td></tr>';
   }).join('');
   const blocked=scShipmentBlocked(txn);
+  /* When a bin is empty, say WHERE the material actually is. A red "no stock" banner with no
+     onward move is what stranded this step: the Planner cannot edit the approved SCR and step 6
+     has no return action, so without this they had nothing to act on. */
+  let hint='';
+  if(blocked&&edit){
+    const alts=[];
+    scShipLines(txn).forEach(function(r){
+      const need=Number(r.qty||0);
+      if(scAvail(r.item,r.warehouse,r.location,txn.id)>=need&&need>0)return;
+      scMaster.stock.forEach(function(st){
+        if(st.item!==r.item)return;
+        const a=scAvail(st.item,st.warehouse,st.location,txn.id);
+        if(a>=need&&need>0)alts.push('<b>'+scEsc(r.item)+'</b> has '+a+' available at <b>'+scEsc(st.warehouse)+' / '+scEsc(st.location)+'</b>');
+      });
+    });
+    hint=alts.length
+      ? '<div class="sc-warn amber" style="margin-top:10px"><b>Where this material is in stock</b><br>'
+        +alts.join('<br>')+'<br><br>Change the Warehouse or Storage Location above to draw from one of these. '
+        +'FR6.2 lets you choose the source location on the shipment — the approved SCR itself is not changed.</div>'
+      : '<div class="sc-warn amber" style="margin-top:10px"><b>No location holds enough of this material.</b><br>'
+        +'Nothing in the warehouse master has the required quantity free, so this shipment cannot be sourced as it stands. '
+        +'The SCR needs correcting — ask the Buyer to raise a Return SCR from the PO step.</div>';
+  }
   return '<div class="sc-sec"><div class="sc-sec-h">Issue Items &amp; Availability</div>'
-    +scPanelTable(['#','Issue Item','Shipment Qty','UOM','Warehouse','Storage Loc.','Available','Check'],rows,760)
+    +scPanelTable(['#','Issue Item','Shipment Qty','UOM','Warehouse','Storage Loc.','Available','Check'],rows,820)
     +(blocked?'<div class="sc-warn red"><b>Shipment cannot be submitted.</b><br>'+scEsc(blocked)+'</div>'
       :'<div class="sc-warn green"><b>Material is available.</b><br>Submitting reserves these quantities against this shipment and moves them to the Reserved location. No physical movement happens at this stage.</div>')
-    +'<div class="sc-help">Stock reserved for another transaction is not counted as available.</div></div>';
+    +hint
+    +'<div class="sc-help">Stock reserved for another transaction is not counted as available. '
+    +(edit?'Warehouse and storage location are yours to choose (FR6.2); the product and quantity come from the approved SCR and cannot be changed here.':'')
+    +'</div></div>';
 }
 /* FR7.3's block table has six rows; five were enforced and this one had neither a field nor a
    check behind it: "WIP Adjustment required but Adjustment Order Reference missing → Submission
@@ -2533,11 +2617,15 @@ function scWipBlocked(txn){
 function scShipmentBlocked(txn){
   const wip=scWipBlocked(txn);
   if(wip)return wip;
-  const rows=txn.scr.issueItems||[];
+  // Checked against the SHIPMENT's source location (FR6.2), which is what the reservation will
+  // actually draw from — not the SCR's, which the Planner may have moved away from.
+  const rows=scShipLines(txn);
   if(!rows.length)return 'No issue items on the SCR.';
   for(let i=0;i<rows.length;i++){
-    const r=rows[i],need=Number(r.qty||0),have=scAvail(r.item,r.warehouse,r.location);
+    const r=rows[i],need=Number(r.qty||0);
     if(!need)return r.item+' has no quantity.';
+    if(!r.warehouse||!r.location)return r.item+' needs a source warehouse and storage location.';
+    const have=scAvail(r.item,r.warehouse,r.location,txn.id);
     if(have===0)return 'No stock available for '+r.item+' at '+r.warehouse+' / '+r.location+'.';
     if(have<need)return r.item+' is short by '+(need-have)+' at '+r.warehouse+' / '+r.location+'.';
   }
@@ -2557,7 +2645,8 @@ function scReservedFor(txn,row){
 }
 function scPanel8(txn){
   const sh=txn.shipment;
-  const rows=(txn.scr.issueItems||[]).map(function(r){
+  // Stores picks from the shipment's source location, so the pick list must show that one.
+  const rows=scShipLines(txn).map(function(r){
     const it=scItem(r.item),need=Number(r.qty||0),res=scReservedFor(txn,r);
     return '<tr><td><b>'+scEsc(r.item)+'</b><div class="sc-sub">'+scEsc(it?it.name:'')+'</div></td>'
       +'<td>'+scEsc(r.qty)+' '+scEsc(it?it.uom:'')+'</td><td>'+scEsc(r.warehouse)+'</td><td>'+scEsc(r.location)+'</td>'
