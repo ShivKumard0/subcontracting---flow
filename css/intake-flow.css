@@ -1,0 +1,416 @@
+/* Client intake flow (AI Execution Layer > Create Contract).
+   A focused, linear task surface rather than another browsing page: the app sidebar is hidden
+   for the duration (renderer.js), the three stages stay visible as a stepper so the journey
+   reads as one continuation, and the form itself gets the whole viewport so its fields can
+   breathe. Fields are deliberately larger than the app's dense table-oriented controls — this
+   is a data-entry moment, and 13px inputs at 34px tall are for grids, not for typing into. */
+
+.uif-page{position:relative;min-height:100vh;background:var(--light);display:flex;flex-direction:column}
+
+/* -- Exit route. Floats over the page rather than sitting in a bar of its own: a full-width
+   strip carrying one button is a band of chrome the form has to begin underneath, and the only
+   thing it added was vertical distance to the first field. Floating keeps the way out exactly
+   where the eye looks for it while giving the whole viewport back to the form.
+
+   Absolute, not fixed — the flow scrolls as one page, and a button pinned to the glass would
+   hang over the card once it does. -- */
+.uif-exit{display:inline-flex;align-items:center;gap:7px;padding:7px 13px;border-radius:8px;
+  border:1px solid var(--border);background:#fff;color:var(--navy);font-size:12.5px;font-weight:600;
+  font-family:inherit;cursor:pointer;transition:.15s}
+.uif-exit:hover{background:var(--ol);border-color:#cbd5e1}
+.uif-exit--float{position:absolute;top:18px;left:22px;z-index:3;
+  box-shadow:0 1px 3px rgba(15,23,42,.06)}
+
+/* -- Stepper: the whole journey, always visible, so step 1 already shows what follows.
+   Top padding clears the floating exit button on narrow viewports, where the two would
+   otherwise overlap; on wide ones the stepper is centred and the button sits well clear. -- */
+.uif-stepper{display:flex;align-items:flex-start;justify-content:center;gap:0;
+  padding:22px 26px 8px;max-width:760px;margin:0 auto;width:100%}
+.uif-step{display:flex;flex-direction:column;align-items:center;gap:9px;flex:0 0 auto;width:132px;text-align:center}
+.uif-step-dot{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:700;border:2px solid var(--border);background:#fff;color:#9ca3af;transition:.25s}
+.uif-step-label{font-size:12px;font-weight:600;color:#9ca3af;line-height:1.35;transition:.25s}
+.uif-step-sub{font-size:10.5px;color:#b3bac5;line-height:1.35}
+.uif-step.is-active .uif-step-dot{border-color:var(--navy);background:var(--navy);color:#fff;
+  box-shadow:0 0 0 4px rgba(15,23,42,.08)}
+.uif-step.is-active .uif-step-label{color:var(--navy)}
+.uif-step.is-done .uif-step-dot{border-color:#0d9488;background:#0d9488;color:#fff}
+.uif-step.is-done .uif-step-label{color:#0f766e}
+/* Connector sits level with the dot centre, not the label block. */
+.uif-step-line{flex:1;height:2px;background:var(--border);margin-top:17px;min-width:24px;border-radius:2px;transition:.25s}
+.uif-step-line.is-done{background:#0d9488}
+
+/* align-items:flex-start matters — the default `stretch` made the card grow to the full height
+   of the flex row, leaving a tall empty white block under short content. */
+.uif-body{flex:1;display:flex;justify-content:center;align-items:flex-start;padding:16px 26px 56px}
+/* 740, up from 680: the signup now carries six sections of two-column fields, and at the
+   old width the pairs were narrow enough that a "Bank Account Holder's Name" label wrapped
+   to two lines while its input held eleven characters. */
+.uif-card{width:100%;max-width:740px;background:#fff;border:1px solid var(--border);border-radius:14px;
+  padding:30px 32px;box-shadow:0 1px 3px rgba(15,23,42,.04)}
+.uif-card-head{margin-bottom:24px}
+.uif-card-title{font-size:18px;font-weight:700;color:var(--navy);margin-bottom:5px}
+.uif-card-sub{font-size:13px;color:var(--gray);line-height:1.6}
+
+/* -- Sections -----------------------------------------------------------------
+   The signup grew from eleven controls to thirty when it stopped summarising
+   Bhaiyaa's form and started matching it. Thirty controls in one column is not a
+   form, it is a wall — so each group of fields gets a heading, a sentence saying
+   what the group is for, and a count of its own required fields.
+
+   The count is the part that earns its place. "How much of this is left" is the
+   question a long form provokes and cannot answer, and a per-section counter
+   answers it without a progress bar that would imply a pagination this flow does
+   not have: it is still one screen, still one submit. */
+.uif-sec{padding:22px 0 4px;border-top:1px solid var(--ol)}
+.uif-sec:first-of-type{padding-top:0;border-top:none}
+.uif-sec-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}
+.uif-sec-titles{min-width:0}
+.uif-sec-title{font-size:13.5px;font-weight:700;color:var(--navy);letter-spacing:-.1px}
+.uif-sec-sub{font-size:11.5px;color:var(--gray);line-height:1.5;margin-top:3px}
+/* Grey while counting, teal once the section is done — the same teal the stepper
+   spends on a finished stage, because it is the same claim at a smaller scale. */
+.uif-sec-count{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;font-size:10.5px;font-weight:700;
+  letter-spacing:.3px;color:var(--gray);background:var(--light);border:1px solid var(--border);
+  border-radius:20px;padding:4px 10px;white-space:nowrap;transition:.2s}
+.uif-sec.is-complete .uif-sec-count{color:#0f766e;background:#f0fdfa;border-color:#99f6e4}
+
+/* -- Form -- */
+.uif-grid{display:grid;grid-template-columns:1fr 1fr;gap:19px 20px}
+/* Identifiers — PAN, GSTIN, IFSC, pin code, account number. Tabular figures and a
+   monospace face because these are read character by character when they are checked
+   against a document, and a proportional 0/O or 1/l is where that goes wrong. */
+.uif-input.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;letter-spacing:.4px}
+.uif-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+/* Optional is stated, not implied by the absence of an asterisk. On a form this long
+   "is this one required?" is asked of every field, and answering it only half the time
+   means the reader has to hold the rule in their head. */
+.uif-label .opt{margin-left:6px;font-size:10px;font-weight:600;color:#9ca3af;letter-spacing:.2px;
+  text-transform:uppercase}
+.uif-field{display:flex;flex-direction:column;gap:7px;min-width:0}
+.uif-field.uif-full{grid-column:1 / -1}
+.uif-label{font-size:12.5px;font-weight:600;color:var(--navy)}
+.uif-label .req{color:var(--red);margin-left:2px}
+.uif-input,.uif-select{width:100%;box-sizing:border-box;padding:11px 13px;font-size:14px;font-family:inherit;
+  color:var(--navy);background:#fff;border:1px solid #d6dbe3;border-radius:9px;outline:none;transition:.15s}
+.uif-input::placeholder{color:#aab2bf}
+.uif-select{padding-right:34px;appearance:none;cursor:pointer;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 12px center}
+.uif-input:focus,.uif-select:focus{border-color:#0d9488;box-shadow:0 0 0 3px rgba(13,148,136,.12)}
+/* Errors are per-field rather than one banner at the top: the message belongs next to the
+   control that has to change. */
+.uif-field.has-error .uif-input,.uif-field.has-error .uif-select{border-color:var(--red);background:#fffbfb}
+.uif-field.has-error .uif-input:focus,.uif-field.has-error .uif-select:focus{box-shadow:0 0 0 3px rgba(239,68,68,.13)}
+.uif-error-text{font-size:11.5px;color:#b91c1c;line-height:1.4}
+.uif-phone{display:grid;grid-template-columns:118px 1fr;gap:10px}
+
+/* ===== BHAIYAA STORE SIGNUP ==================================================
+   Three controls the NewForce intake form has no need for. They live in this file
+   rather than one of their own because they are the same kit — a form that borrowed
+   half its styles from here and half from elsewhere would drift on the first change
+   to either. ----------------------------------------------------------------- */
+
+/* Help text under a field. Distinct from .uif-hint, which is the one line in the
+   actions row explaining the whole form; this one belongs to a single control and
+   sits under it, so it reads as part of the question rather than a footnote. */
+.uif-field-hint{font-size:11.5px;color:var(--gray);line-height:1.5}
+
+/* Mobile row: dial code, number, and the OTP control. The third column is sized to
+   its content so "Get OTP", "Resend OTP" and the Verified chip can each take the
+   width they need without the number field jumping between renders. */
+.uif-mobile{display:grid;grid-template-columns:104px minmax(0,1fr) auto;gap:10px;align-items:center}
+.uif-otp-btn{padding:11px 16px;border-radius:9px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;
+  font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;white-space:nowrap;transition:.15s}
+.uif-otp-btn:hover{background:#ede9fe;border-color:#a78bfa}
+.uif-otp-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;margin-top:2px}
+.uif-otp-row .uif-input{letter-spacing:3px;font-weight:600}
+.uif-otp-row .uif-input.is-error{border-color:var(--red);background:#fffbfb}
+.uif-otp-verify{padding:11px 20px;border-radius:9px;border:none;background:var(--navy);color:#fff;
+  font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;white-space:nowrap;transition:.15s}
+.uif-otp-verify:hover{background:#1e293b}
+/* A verified number is a fact about the record, so the chip is the same object on the
+   form and on the success screen — only the size changes. */
+.uif-verified-chip{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;
+  color:#15803d;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:20px;padding:2px 9px;white-space:nowrap}
+.uif-verified-chip.lg{font-size:12px;padding:9px 14px;border-radius:9px}
+
+/* -- Document upload --------------------------------------------------------------
+   Two states, one control. Empty is a dashed drop target with the native input hidden
+   inside its own label, so the whole box is the click target rather than a 13px
+   "Choose file" button. Picked is a chip naming the file — the native control cannot
+   be re-populated from script, so after any re-render it would show "No file chosen"
+   for a document we are holding. The chip reads from the draft and cannot lie. */
+.uif-file-field{gap:7px}
+.uif-file-drop{display:flex;align-items:center;justify-content:center;gap:8px;padding:13px 14px;
+  border:1.5px dashed #cbd5e1;border-radius:9px;background:var(--light);color:var(--gray);
+  font-size:12.5px;font-weight:600;cursor:pointer;transition:.15s;text-align:center}
+.uif-file-drop:hover{border-color:#0d9488;background:#f0fdfa;color:#0f766e}
+.uif-file-drop input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.uif-file-drop svg{flex-shrink:0}
+.uif-field.has-error .uif-file-drop{border-color:var(--red);background:#fffbfb}
+.uif-file-picked{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #99f6e4;
+  border-radius:9px;background:#f0fdfa}
+.uif-file-ico{width:26px;height:26px;border-radius:7px;background:#0d9488;color:#fff;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center}
+.uif-file-meta{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.uif-file-meta b{font-size:12px;font-weight:600;color:#0f766e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.uif-file-meta i{font-size:10.5px;font-style:normal;color:#5b9c95}
+.uif-file-clear{width:24px;height:24px;flex-shrink:0;border:none;border-radius:6px;background:transparent;
+  color:#0f766e;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
+.uif-file-clear:hover{background:#ccfbf1}
+
+/* Consent. A button rather than a checkbox input: the whole row is the target, which
+   is the difference between "accept the terms" being one click and being a 13px one. */
+.uif-consent-field{gap:0}
+.uif-consent{display:flex;align-items:flex-start;gap:10px;width:100%;padding:2px 0;
+  background:none;border:none;font-family:inherit;text-align:left;cursor:pointer}
+.uif-consent-box{width:17px;height:17px;flex-shrink:0;margin-top:1px;border-radius:5px;border:1.5px solid #c3cad4;
+  background:#fff;color:#fff;display:flex;align-items:center;justify-content:center;transition:.15s}
+.uif-consent:hover .uif-consent-box{border-color:#94a3b8}
+.uif-consent.on .uif-consent-box{background:var(--navy);border-color:var(--navy)}
+.uif-consent-text{font-size:12.5px;color:var(--navy);line-height:1.5}
+.uif-consent-link{font-weight:700;color:#6d28d9;text-decoration:underline;text-underline-offset:2px}
+.uif-field.has-error .uif-consent-box{border-color:var(--red)}
+.uif-consent-stamp{color:var(--gray);font-size:11px}
+
+/* ----- stage 3: the run --------------------------------------------------- */
+/* Each step slides in as it is reached rather than all of them appearing at once, so the eye is
+   taken down the list in the order the work actually happened. */
+@keyframes st-step-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes st-pair-in{from{opacity:0;transform:translateX(-5px)}to{opacity:1;transform:none}}
+.st-run-item.is-active .uif-proc-note,.st-run-item.is-active .st-io{animation:st-step-in .3s ease both}
+.st-io{display:flex;align-items:flex-start;gap:9px;margin-top:8px}
+.st-io-tag{flex-shrink:0;font-size:9.5px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;
+  padding:3px 8px;border-radius:20px;margin-top:1px}
+.st-io--read .st-io-tag{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}
+/* Writes are the half that did not exist a moment ago, so they are the half that gets the colour. */
+.st-io--write .st-io-tag{background:#f0fdfa;color:#0f766e;border:1px solid #99f6e4}
+.st-io-list{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+.st-io-pair{display:inline-flex;align-items:center;gap:0;border-radius:7px;overflow:hidden;
+  border:1px solid var(--border);background:#fff;animation:st-pair-in .28s ease both}
+.st-io-k{font-size:10.5px;font-weight:600;color:var(--gray);background:var(--light);padding:3px 8px;white-space:nowrap}
+.st-io-v{font-size:11px;font-weight:600;color:var(--navy);padding:3px 9px;white-space:nowrap;
+  max-width:230px;overflow:hidden;text-overflow:ellipsis}
+.st-io--write .st-io-v{color:#0f766e}
+
+
+.uif-actions{display:flex;align-items:center;justify-content:space-between;gap:14px;
+  margin-top:28px;padding-top:22px;border-top:1px solid var(--ol);flex-wrap:wrap}
+.uif-hint{font-size:11.5px;color:var(--gray);line-height:1.5;flex:1;min-width:180px}
+.uif-submit{display:inline-flex;align-items:center;gap:8px;padding:11px 24px;border:none;border-radius:9px;
+  font-size:13.5px;font-weight:600;color:#fff;background:var(--navy);font-family:inherit;cursor:pointer;transition:.15s}
+.uif-submit:hover:not(:disabled){background:#1e293b}
+.uif-submit:disabled{opacity:.55;cursor:default}
+
+.uif-banner{display:flex;gap:10px;padding:12px 14px;border-radius:10px;font-size:12.5px;line-height:1.6;margin-bottom:20px}
+.uif-banner.warn{background:#fdf6d8;border:1px solid #f0dfa0;color:#8a6d10}
+.uif-banner.error{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c}
+.uif-banner code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.uif-banner button{background:none;border:none;padding:0;font:inherit;font-weight:700;
+  color:inherit;text-decoration:underline;cursor:pointer}
+
+/* -- Processing: the journey made visible while it happens, so the wait explains itself. -- */
+.uif-proc{display:flex;flex-direction:column;gap:2px}
+.uif-proc-item{display:flex;gap:14px;align-items:flex-start}
+.uif-proc-rail{display:flex;flex-direction:column;align-items:center;flex-shrink:0;width:24px}
+.uif-proc-dot{width:22px;height:22px;border-radius:50%;border:2px solid var(--border);background:#fff;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:.25s}
+.uif-proc-line{width:2px;flex:1;min-height:22px;background:var(--border);margin:2px 0;transition:.25s}
+.uif-proc-body{padding-bottom:18px;min-width:0;flex:1}
+.uif-proc-title{font-size:13.5px;font-weight:600;color:#9ca3af;transition:.25s}
+.uif-proc-note{font-size:12px;color:var(--gray);margin-top:3px;line-height:1.5}
+.uif-proc-item.is-active .uif-proc-dot{border-color:var(--navy);background:var(--navy)}
+.uif-proc-item.is-active .uif-proc-title{color:var(--navy)}
+.uif-proc-item.is-done .uif-proc-dot{border-color:#0d9488;background:#0d9488}
+.uif-proc-item.is-done .uif-proc-line{background:#0d9488}
+.uif-proc-item.is-done .uif-proc-title{color:var(--navy)}
+.uif-spin{width:9px;height:9px;border-radius:50%;border:2px solid rgba(255,255,255,.35);
+  border-top-color:#fff;animation:uif-spin .7s linear infinite}
+@keyframes uif-spin{to{transform:rotate(360deg)}}
+
+/* -- Success -- */
+.uif-success-head{display:flex;gap:13px;align-items:flex-start;padding:16px 18px;border-radius:11px;
+  background:#f0fdf4;border:1px solid #bbf7d0;margin-bottom:24px}
+.uif-success-icon{width:32px;height:32px;border-radius:50%;background:#16a34a;color:#fff;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center}
+.uif-success-title{font-size:14.5px;font-weight:700;color:#15803d;margin-bottom:3px}
+.uif-success-sub{font-size:12.5px;color:#166534;line-height:1.6}
+
+/* -- The two ids the client now has. Side by side and visually distinct, because the point being
+   made is that they are two ids from two systems for one client — not one id and its copy. The
+   note under each names the system that issued it, which is the whole reason they differ. -- */
+.uif-idrow{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:12px}
+.uif-idcard{padding:13px 15px;border:1px solid var(--border);border-radius:10px;background:var(--light);min-width:0}
+.uif-idcard-label{font-size:10.5px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:var(--gray);margin-bottom:5px}
+.uif-idcard-value{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;font-weight:600;
+  color:var(--navy);overflow-wrap:anywhere}
+.uif-idcard-note{font-size:11px;color:var(--gray);margin-top:5px;line-height:1.4}
+.uif-idcard.accent{background:#f0fdfa;border-color:#99f6e4}
+.uif-idcard.accent .uif-idcard-value{color:#0d9488}
+.uif-idcard.accent .uif-idcard-note{color:#0f766e}
+.uif-idnote{font-size:11.5px;color:var(--gray);line-height:1.6;margin:0 0 22px}
+
+.uif-section-label{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;
+  color:var(--gray);margin:0 0 11px}
+/* The success screen repeats the form's grouping, so the label needs air above it once there
+   is more than one block. The first keeps its original spacing. */
+.uif-section-label + .uif-kvblock + .uif-section-label{margin-top:22px}
+.uif-kvblock{margin-bottom:4px}
+.uif-kv{display:flex;justify-content:space-between;gap:18px;padding:10px 0;border-bottom:1px dashed var(--border)}
+.uif-kv:last-child{border-bottom:none}
+.uif-kv-key{font-size:12.5px;color:var(--gray);flex-shrink:0}
+.uif-kv-val{font-size:13px;font-weight:600;color:var(--navy);text-align:right;overflow-wrap:anywhere}
+.uif-note{font-size:12.5px;color:var(--gray);line-height:1.7;margin:20px 0 0;padding:13px 15px;
+  border-radius:10px;background:var(--light);border:1px solid var(--border)}
+.uif-cta{display:flex;gap:11px;flex-wrap:wrap;margin-top:24px}
+.uif-btn-secondary{padding:11px 20px;border:1px solid var(--border);border-radius:9px;background:#fff;
+  color:var(--navy);font-size:13.5px;font-weight:600;font-family:inherit;cursor:pointer;transition:.15s}
+.uif-btn-secondary:hover{background:var(--ol);border-color:#cbd5e1}
+
+@media (max-width:760px){
+  .uif-grid{grid-template-columns:1fr}
+  .uif-idrow{grid-template-columns:1fr}
+  .uif-step{width:96px}
+  .uif-step-sub{display:none}
+  .uif-card{padding:24px 20px}
+  .uif-body{padding:18px 14px 40px}
+  /* Narrow enough that the stepper reaches the left edge, so the floating button would land on
+     top of the first step. It returns to the flow and the stepper follows it down. */
+  .uif-exit--float{position:static;margin:14px 0 -4px 14px}
+  .uif-stepper{padding-top:14px}
+}
+
+/* ===== STORE RECORD (shown inside the All Clients drawer) ====================
+   A store is a client record from a different platform, so these styles decorate the
+   drawer rather than a listing of their own. The role tag and the consent rows are all
+   that survived the separate Stores module being removed. -------------------------- */
+.st-role-tag{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;
+  padding:2px 7px;border-radius:20px;white-space:nowrap;flex-shrink:0;
+  background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}
+.st-role-tag.seller{background:#f5f3ff;color:#6d28d9;border-color:#ddd6fe}
+.st-role-tag.buyer{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}
+.st-consents{display:flex;flex-direction:column;gap:8px}
+.st-consent-row{display:flex;align-items:center;gap:9px;padding:9px 12px;border:1px solid var(--border);
+  border-radius:9px;background:#fff}
+.st-consent-tick{width:18px;height:18px;border-radius:50%;background:#0d9488;color:#fff;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center}
+.st-consent-name{flex:1;min-width:0;font-size:12.5px;font-weight:600;color:var(--navy)}
+.st-consent-at{font-size:11px;color:var(--gray);white-space:nowrap}
+
+/* ===== JOURNEY RAIL ON THE STORE FLOW =======================================
+   The app's aicj bar, sized for this flow. It replaces the flow's own stepper so
+   the five stages a merchant walks are drawn by the same component that draws
+   every other journey — one rail, one vocabulary. ---------------------------- */
+.st-journey-bar{max-width:920px;margin:0 auto;width:100%;padding:20px 26px 0}
+
+/* ----- KYC stage ---------------------------------------------------------- */
+/* The id under verification, shown once and masked. It sits above the checks
+   because "whose Aadhaar is being checked" has to be answerable before the
+   checks mean anything. */
+.st-kyc-id{display:flex;align-items:center;gap:14px;padding:15px 17px;margin-bottom:20px;
+  border:1.5px solid #ddd6fe;background:linear-gradient(180deg,#faf9ff,#f5f3ff);border-radius:12px}
+.st-kyc-id-ico{width:40px;height:40px;border-radius:10px;background:#ede9fe;color:#6d28d9;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center}
+.st-kyc-id-label{font-size:10px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:#7c69b5;margin-bottom:3px}
+.st-kyc-id-num{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:16px;font-weight:700;
+  color:var(--navy);letter-spacing:1.5px}
+.st-kyc-id-name{font-size:11.5px;color:var(--gray);margin-top:2px}
+.st-kyc-id .uif-verified-chip{margin-left:auto}
+
+/* ===== VERIFYING AN EXISTING STORE ==========================================
+   The KYC screen reached from the Store Operations board rather than from a
+   signup. Three things the creation path has no need for: a crumb back to where
+   you came from, the block of details Bhaiyaa returned, and a verified state
+   that ends in "make this live" instead of "create the store". ------------- */
+.so-kyc-crumb{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.so-kyc-back{display:inline-flex;align-items:center;gap:5px;padding:4px 10px 4px 7px;border-radius:7px;
+  border:1px solid var(--border);background:#fff;color:var(--navy);font-family:inherit;font-size:11.5px;
+  font-weight:600;cursor:pointer;transition:.15s}
+.so-kyc-back:hover{background:var(--ol);border-color:#cbd5e1}
+.so-kyc-crumb-sep{color:#cbd5e1;font-size:12px}
+.so-kyc-crumb-ref{font-size:11.5px;color:var(--gray);font-weight:500}
+
+/* The fetched block. Bordered and tinted so it reads as a quotation from another
+   system rather than a form we are about to write to — this is the one panel on
+   the page nobody can edit, and it has to look like it. */
+.so-kycbox{border:1px solid #dbeafe;background:linear-gradient(180deg,#f8fbff,#f1f7fe);
+  border-radius:12px;padding:14px 16px;margin-bottom:18px}
+.so-kycbox-head{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  margin-bottom:12px;flex-wrap:wrap}
+.so-kycbox-title{display:inline-flex;align-items:center;gap:6px;font-size:10.5px;font-weight:800;
+  letter-spacing:.5px;text-transform:uppercase;color:#1d4ed8}
+.so-kycbox-src{font-size:10.5px;color:#6b8cc4;font-weight:600}
+.so-kycgrid{display:grid;grid-template-columns:1fr 1fr;gap:11px 18px}
+.so-kycf{min-width:0}
+.so-kycf-k{font-size:10.5px;color:#7f9bc9;font-weight:600;margin-bottom:2px}
+.so-kycf-v{font-size:12.5px;font-weight:600;color:var(--navy);overflow-wrap:anywhere}
+.so-kycf-v.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;letter-spacing:.3px}
+.so-kycf-none{color:#9ca3af;font-weight:500}
+
+/* Verified. Green because this is the one moment on the page that is genuinely an
+   outcome rather than a state — everything else here is monochrome. */
+.so-kycdone{display:flex;gap:13px;align-items:flex-start;padding:15px 17px;border-radius:12px;
+  background:#f0fdf4;border:1px solid #bbf7d0;margin-top:20px}
+.so-kycdone-ico{width:34px;height:34px;border-radius:50%;background:#16a34a;color:#fff;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center}
+.so-kycdone-txt{min-width:0}
+.so-kycdone-title{font-size:14px;font-weight:700;color:#15803d;margin-bottom:3px}
+.so-kycdone-sub{font-size:12.5px;color:#166534;line-height:1.6}
+.uif-submit.so-golive{background:#0d9488}
+.uif-submit.so-golive:hover:not(:disabled){background:#0f766e}
+
+@media (max-width:760px){ .so-kycgrid{grid-template-columns:1fr} }
+
+/* ----- the creation run's milestone -------------------------------------- */
+/* One step in the run is the moment the store starts existing. It gets a ring and
+   a teal dot so the eye can find it later without re-reading every line — a feed
+   where every step looks identical never says which one mattered. */
+.st-run-item.is-milestone .uif-proc-title{font-weight:800}
+.st-run-item.is-milestone.is-done .uif-proc-dot,
+.st-run-item.is-milestone.is-active .uif-proc-dot{background:#0d9488;border-color:#0d9488;
+  box-shadow:0 0 0 4px rgba(13,148,136,.14)}
+.st-run-item.is-milestone .uif-proc-body{position:relative}
+@keyframes st-milestone-in{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+.st-run-item.is-milestone.is-active .uif-proc-body,
+.st-run-item.is-milestone.is-done .uif-proc-body{animation:st-milestone-in .42s cubic-bezier(.2,.7,.3,1) both}
+
+/* ===== STORES LISTING ======================================================= */
+.st-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;font-weight:600;color:var(--navy)}
+.st-code.src{color:#0d9488}
+.st-row-sub{display:flex;align-items:center;gap:7px;margin-top:4px;min-width:0}
+.st-row-cat{font-size:11px;color:var(--gray);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lp-pill-input{padding:8px 14px;border:1px solid var(--border);border-radius:20px;background:#fff;
+  font-family:inherit;font-size:12.5px;color:var(--navy);outline:none;min-width:200px}
+.lp-pill-input:focus{border-color:#0d9488;box-shadow:0 0 0 3px rgba(13,148,136,.12)}
+
+/* ===== REVIEWING A COMPLETED STAGE ==========================================
+   Finished dots on the rail become inspectable. The affordance has to read as
+   "there is something behind this" without competing with the current-step dot,
+   so it is a hover lift plus a cursor — not a colour, which the rail already
+   spends on done/current/pending. --------------------------------------------- */
+.aicj-step.is-clickable{cursor:pointer;border-radius:10px;padding:4px 6px;margin:-4px -6px;transition:.16s}
+.aicj-step.is-clickable:hover{background:#f1f5f9}
+.aicj-step.is-clickable:hover .aicj-step-label{color:var(--navy)}
+.aicj-step.is-clickable:focus-visible{outline:2px solid var(--navy);outline-offset:2px}
+/* The one being read. A ring rather than a fill, so the dot still reports its
+   real done state underneath — progress and selection are different facts. */
+.aicj-step.is-reviewing .aicj-dot{box-shadow:0 0 0 4px rgba(109,40,217,.18)}
+.aicj-step.is-reviewing .aicj-step-label{color:#6d28d9;font-weight:800}
+
+/* The banner. Load-bearing: it is the only thing separating "a finished step you
+   are reading" from "the step you are on", and those must never be confusable. */
+.st-review-banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:12px 15px;margin-bottom:20px;border:1px solid #ddd6fe;border-radius:11px;
+  background:linear-gradient(180deg,#faf9ff,#f5f3ff)}
+.st-review-badge{font-size:9.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;
+  color:#0f766e;background:#f0fdfa;border:1px solid #99f6e4;border-radius:20px;padding:3px 9px;flex-shrink:0}
+.st-review-banner-txt{flex:1;min-width:180px;font-size:12px;color:#4c3f78;line-height:1.55}
+.st-review-back{display:inline-flex;align-items:center;gap:7px;padding:8px 15px;border-radius:8px;
+  border:none;background:var(--navy);color:#fff;font-family:inherit;font-size:12px;font-weight:700;
+  cursor:pointer;white-space:nowrap;transition:.15s}
+.st-review-back:hover{background:#1e293b}
+
+.st-review-meta{display:flex;gap:16px;flex-wrap:wrap;margin-top:20px;padding-top:14px;
+  border-top:1px solid var(--ol,#eef1f5);font-size:11.5px;color:var(--gray)}
+.st-review-meta strong{color:var(--navy)}

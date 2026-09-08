@@ -1,0 +1,246 @@
+﻿<!DOCTYPE html>
+<html lang="en"><head>
+<!-- Extracted from single-file bundle. Open this file directly in Chrome. -->
+<script>window.__resources = {"logo": "assets/Opendhilogo.png"};</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ADT Agent &amp; Support Mode — V2</title>
+
+
+<link rel="stylesheet" href="css/fonts.css">
+<link rel="stylesheet" href="css/cost-calc.css">
+<link rel="stylesheet" href="css/main.css">
+<link rel="stylesheet" href="css/leaves.css">
+<link rel="stylesheet" href="css/intake-flow.css"></head>
+<body>
+<!-- ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€šÃ‚Â ADT DASHBOARD ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€šÃ‚Â -->
+<div id="v-adt" class="view active">
+  <div class="topbar">
+    <div class="topbar-left" style="font-family: Inter">
+      <div class="adt-logo">
+        <img src="assets/Opendhilogo.png" alt="Opendhi">
+      </div>
+      <span class="topbar-page" id="adt-page-title">Dashboard</span>
+      <button class="tb-page-add" id="tb-page-add-btn" style="display:none" title="Add new"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+      <button class="tb-cost-calc" id="tb-cost-calc-btn" style="display:none" onclick="openCostCalculator()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/></svg> Cost Calculator</button>
+    </div>
+    <div class="topbar-right" style="position:relative">
+      <button class="agent-btn" id="adt-agent-btn" style="display:none" onclick="openAgent()"><span class="spark"><svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8'><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/></svg></span> Agent Mode</button>
+      <button class="tb-icon" onclick="openSearch()" title="Search (Ctrl+K)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg></button>
+      <button class="tb-icon" onclick="toggleNotif(event)" id="notif-trigger"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg></button>
+      <!-- Entity dropdown -->
+      <div class="hdr-dd-wrap" id="entity-dd-wrap">
+        <div class="company-sel" onclick="toggleHdrDD('entity-dd')" id="entity-trigger">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          Dhi Hyperlocal
+          <svg class="hdr-dd-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="hdr-dd-panel" id="entity-dd">
+          <div class="hdr-dd-header">
+            <div class="hdr-dd-entity-logo">DH</div>
+            <div>
+              <div class="hdr-dd-title">Dhi Hyperlocal</div>
+              <div class="hdr-dd-subtitle">Entity ID: ENT-00421</div>
+            </div>
+          </div>
+          <div class="hdr-dd-divider"></div>
+          <div class="hdr-dd-info-row"><span class="hdr-dd-info-label">Type</span><span class="hdr-dd-info-val">EOR Entity</span></div>
+          <div class="hdr-dd-info-row"><span class="hdr-dd-info-label">Country</span><span class="hdr-dd-info-val">India</span></div>
+          <div class="hdr-dd-info-row"><span class="hdr-dd-info-label">Plan</span><span class="hdr-dd-info-val hdr-dd-badge">Enterprise</span></div>
+          <div class="hdr-dd-divider"></div>
+          <button class="hdr-dd-item" onclick="closeAllHdrDD();navigatePage('switch-entity')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            Switch Entity
+          </button>
+          <button class="hdr-dd-item" onclick="closeAllHdrDD()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+            Entity Settings
+          </button>
+          <button class="hdr-dd-item" onclick="closeAllHdrDD()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Billing & Invoices
+          </button>
+        </div>
+      </div>
+      <!-- User profile dropdown -->
+      <div class="hdr-dd-wrap" id="user-dd-wrap">
+        <div class="user-sel" onclick="openUserDD()" id="user-trigger">
+          <div class="user-avatar-sm" id="user-trigger-avatar">SA</div>
+          <span id="user-trigger-label">Super Admin</span>
+          <svg class="hdr-dd-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="hdr-dd-panel hdr-dd-panel-right" id="user-dd"></div>
+      </div>
+      <div id="notif-pop" class="notif-pop hidden"></div>
+    </div>
+  </div>
+  <div class="content-area">
+    <div class="sidebar" id="adt-sidebar"></div>
+    <div class="page-content" id="adt-content">
+      <p style="font-size:14px;font-weight:600;margin-bottom:4px">Dashboard</p>
+      <p style="font-size:12px;color:var(--gray);margin-bottom:20px">Welcome back, John. Here's your workspace overview.</p>
+      <div class="welcome-banner">
+        <div class="wb-left">
+          <div class="wb-title">Welcome to Dhi ADT!</div>
+          <div class="wb-desc">Simplify international payroll and workforce management with Dhi ADT's trusted global solutions.</div>
+          <div class="wb-btns"><button class="wb-btn primary">Talk to us</button><button class="wb-btn secondary">Know more</button></div>
+        </div>
+        <div class="attendance-card">
+          <div class="att-title">Attendance <a href="#">View</a></div>
+          <div class="att-row"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg> Clock-in Time <span class="att-val">00:00 AM/PM</span></div>
+          <div class="att-row"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg> Location <span class="att-val">Hyderabad</span></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px"><span style="font-size:11px;color:var(--gray)">Logged Time - 00h:00m</span><button class="clock-btn">Clock In</button></div>
+        </div>
+      </div>
+      <div class="quick-links">
+        <div class="ql"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg> My Profile</div><div class="ql"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg> Policies</div><div class="ql"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg> Calendar</div><div class="ql"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg> Leaves &amp; Application</div><div class="ql"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg> Holidays</div><div class="ql"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="5" width="20" height="14" rx="2"></rect><line x1="2" y1="10" x2="22" y2="10"></line></svg> Expense</div><div class="ql"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg> Signout</div>
+      </div>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-label"><span>Total Employees</span><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg></div></div><div class="stat-val">247</div><div class="stat-sub" style="color:var(--green)">&#8599; +12 this month</div></div>
+        <div class="stat-card"><div class="stat-label"><span>Active Teams</span><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></div></div><div class="stat-val">18</div><div class="stat-sub" style="color:var(--gray)">Across 6 departments</div></div>
+        <div class="stat-card"><div class="stat-label"><span>Active Contracts</span><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg></div></div><div class="stat-val">25</div><div class="stat-sub" style="color:var(--gray)">15 Drafts</div></div>
+        <div class="stat-card"><div class="stat-label"><span>Total Invoice Cost</span><div class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"></rect><line x1="2" y1="10" x2="22" y2="10"></line></svg></div></div><div class="stat-val" style="color:var(--orange)">$25,000</div><div class="stat-sub" style="color:var(--gray)">10 invoices generated</div></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€šÃ‚Â AGENT EMPTY ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€šÃ‚Â -->
+<div id="v-agent-empty" class="view">
+  <canvas id="am-webgl-canvas"></canvas>
+  <div class="topbar am-topbar-glass" id="agent-topbar-empty"></div>
+  <div class="agent-empty-center">
+    <div style="text-align:center">
+      <div class="we-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--orange)" stroke-width="1.8"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"></path></svg></div>
+      <h1 style="font-size:24px;font-weight:700;margin-bottom:6px">What can I help you with?</h1>
+      <p style="font-size:13px;color:var(--gray);max-width:400px;line-height:1.5">Ask me to create contracts, run payroll checks, fetch compliance data and more.</p>
+    </div>
+    <div class="actions-grid" id="qa-grid"></div>
+    <div class="input-area" id="inp-empty"></div>
+  </div>
+</div>
+
+<!-- ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€šÃ‚Â AGENT ACTIVE ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢Ãƒâ€šÃ‚Â -->
+<div id="v-agent-active" class="view">
+  <div class="topbar" id="agent-topbar-active"></div>
+  <div class="content-area">
+    <div class="sidebar collapsed" id="agent-sb"></div>
+    <div id="agent-chat-col" style="display:flex;flex-direction:column;flex:0 0 380px;border-right:1px solid var(--border)">
+      <div class="chat-area" id="agent-chat"></div>
+      <div class="input-area" id="inp-active"></div>
+    </div>
+    <div class="form-col" id="form-col" style="display:none"></div>
+  </div>
+</div>
+
+<input type="file" id="agent-upload-input" accept="image/*,.pdf" style="display:none" onchange="handleAgentUpload(event)">
+<input type="file" id="ai-ct-upload-input" accept="image/*,.pdf,.doc,.docx" style="display:none" onchange="aiCtHandleDocUpload(event)">
+<script src="js/exec-config.js"></script>
+<script src="js/execApi.js"></script>
+<script src="js/core.js"></script>
+<script src="js/pages.js"></script>
+<script src="js/renderer.js"></script>
+
+
+
+<style id="__om-edit-overrides">
+#form-col .section-block .selected { background-color: rgb(255, 253, 250) !important }
+#form-col .info-box { background-color: rgb(255, 251, 246) !important }
+#form-col .info-box { background-color: rgb(255, 253, 250) !important }
+</style>
+
+<!-- SEARCH OVERLAY -->
+<div id="search-overlay" onclick="if(event.target.id==='search-overlay'||event.target.classList.contains('search-backdrop'))closeSearch()">
+  <div class="search-backdrop"></div>
+  <div class="search-box">
+    <div class="search-input-row">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="search-input" type="text" placeholder="Search..." autocomplete="off" oninput="onSearchInput(this)" onkeydown="onSearchKeydown(event)">
+      <button class="search-clear" id="search-clear-btn" onclick="clearSearch()" title="Clear">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="search-hints" id="search-hints">
+      <button class="search-hint-chip" onclick="executeSearch('Contracts')">Contracts</button>
+      <button class="search-hint-chip" onclick="executeSearch('Pending payroll')">Pending payroll</button>
+      <button class="search-hint-chip" onclick="executeSearch('Active employees')">Active employees</button>
+      <button class="search-hint-chip" onclick="executeSearch('Compliance items')">Compliance items</button>
+      <button class="search-hint-chip" onclick="executeSearch('Leave requests')">Leave requests</button>
+    </div>
+    <div class="search-footer">
+      <kbd>Esc</kbd> to close &nbsp;&nbsp; <kbd>Enter</kbd> to search
+    </div>
+  </div>
+</div>
+
+<!-- CONTRACTS MODAL -->
+<div id="ct-modal-overlay" class="ct-modal-overlay" style="display:none" onclick="if(event.target===this)closeCtModal()"></div>
+
+<!-- AI TOAST NOTIFICATIONS -->
+<div id="ai-toast-stack" class="ai-toast-stack"></div>
+<!-- TOP-RIGHT NOTIFICATION-STYLE TOAST (locked journey tap) -->
+<div id="locked-toast-stack" class="locked-toast-stack"></div>
+
+<!-- LOCKED JOURNEY DETAILS MODAL -->
+<div id="lj-modal-overlay" class="lj-modal-overlay hidden" onclick="if(event.target===this)closeLockedJourneyModal()">
+  <div class="lj-modal-panel">
+    <div class="lj-modal-header"><button class="lj-modal-close" onclick="closeLockedJourneyModal()">&#x2715;</button></div>
+    <div class="lj-modal-body" id="lj-modal-body"></div>
+  </div>
+</div>
+
+<!-- NOTIFY MANAGER MODAL (Entity User approval screens) -->
+<div id="notify-mgr-overlay" class="lj-modal-overlay hidden" onclick="if(event.target===this)closeNotifyManagerModal()">
+  <div class="lj-modal-panel">
+    <div class="lj-modal-header"><button class="lj-modal-close" onclick="closeNotifyManagerModal()">&#x2715;</button></div>
+    <div class="lj-modal-body" id="notify-mgr-body"></div>
+  </div>
+</div>
+
+<!-- RUN OWNER NOTIFICATION SENT MODAL -->
+<div id="run-notify-overlay" class="lj-modal-overlay hidden" onclick="if(event.target===this)closeRunNotifyModal()">
+  <div class="lj-modal-panel" style="max-width:380px">
+    <div class="lj-modal-header"><button class="lj-modal-close" onclick="closeRunNotifyModal()">&#x2715;</button></div>
+    <div class="lj-modal-body">
+      <div class="lj-modal-icon" style="background:#dcfce7;color:#16a34a"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+      <div class="lj-modal-title">Notification Sent</div>
+      <div class="lj-modal-desc" id="run-notify-desc" style="margin-bottom:0"></div>
+    </div>
+  </div>
+</div>
+
+<!-- COST CALCULATOR MODAL -->
+<div id="cost-calc-overlay" class="cost-calc-overlay hidden" onclick="if(event.target===this)closeCostCalculator()">
+  <div class="cost-calc-panel">
+    <div class="cost-calc-header">
+      <div>
+        <div class="cost-calc-title">Cost Calculator</div>
+        <div class="cost-calc-sub">Powered by Compliance Hub &middot; Employment cost estimation</div>
+      </div>
+      <button class="cost-calc-close" onclick="closeCostCalculator()">&#x2715;</button>
+    </div>
+    <div class="cost-calc-tabs" id="cc-tabs"></div>
+    <div class="cost-calc-body">
+      <div id="cc-loader" class="cc-loader hidden">
+        <div class="cc-spinner"></div>
+        <div class="cc-loader-text">Fetching data from Compliance Hub&#8230;</div>
+      </div>
+      <div id="cc-content" class="cc-content"></div>
+    </div>
+  </div>
+</div><script>
+(function(){
+  try{
+    portalRole='entity-admin';
+    cfgSystemEditing=false;
+    selectedCfgSystemId='adt-solution';
+    showView('adt');
+    page='cfg-system-detail';
+    renderADTPage();
+    window.scrollTo(0,0);
+    var c=document.getElementById('adt-content');
+    if(c)c.scrollTop=99999;
+  }catch(e){document.title='ERR '+e.message;}
+})();
+</script></body></html>

@@ -1,0 +1,477 @@
+﻿
+/* LP INLINE SPLIT SIDEBAR */
+.lp-split-wrap{position:relative;min-width:0;width:100%}
+.lp-split-main{width:100%;min-width:0;overflow-x:auto;border:1px solid var(--border);border-radius:12px;background:#fff}
+.lp-split-sb{position:absolute;top:0;right:0;width:0;overflow:hidden;background:#fff;display:flex;flex-direction:column;border-radius:12px;z-index:10;opacity:0;transition:width .28s cubic-bezier(.4,0,.2,1),opacity .2s;min-height:0}
+.lp-split-sb.open{width:68%;bottom:0;min-height:500px;border:1px solid var(--border);box-shadow:0 8px 32px rgba(15,23,42,.12);opacity:1}
+.lp-isb{display:flex;flex-direction:column;flex:1;min-height:0}
+.lp-isb-tabbar{display:flex;align-items:stretch;border-bottom:1px solid var(--border);background:#fff;flex-shrink:0;min-height:46px}
+.lp-isb-back{width:42px;border-radius:0;border:none;border-right:1px solid var(--border);background:transparent;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#64748b;padding:0;font-family:inherit;transition:.15s}
+.lp-isb-back:hover{background:#f8fafc;color:var(--orange)}
+.lp-isb-tabs{display:flex;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none}
+.lp-isb-tabs::-webkit-scrollbar{display:none}
+.lp-isb-nav-btn{width:30px;border:none;background:transparent;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#94a3b8;padding:0;transition:background .15s,color .15s;border-right:1px solid var(--border)}
+.lp-isb-nav-btn.nav-right{border-right:none;border-left:1px solid var(--border)}
+.lp-isb-nav-btn:hover{background:#f8fafc;color:var(--orange)}
+.lp-isb-tab{position:relative;padding:0 16px;align-self:stretch;border:1.5px solid transparent;border-radius:4px;background:none;cursor:pointer;font-size:13px;font-weight:500;color:var(--gray);font-family:inherit;transition:.15s;white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;margin:0 4px}
+.lp-isb-tab.active{color:var(--orange);border-color:var(--orange);font-weight:600}
+.lp-isb-tab:hover:not(.active){color:var(--navy)}
+.lp-isb-tab--pending{background:#fff7ed;border-color:#fed7aa;color:#b45309;font-weight:600}
+.lp-isb-tab--pending:hover:not(.active){color:#b45309}
+.lp-isb-tab--pending.active{background:#f1f5f9;border-color:var(--orange)}
+.lp-isb-tab-badge{position:absolute;top:2px;right:2px;width:7px;height:7px;border-radius:50%;background:#f97316;box-shadow:0 0 0 2px #fff}
+.lp-isb-right{display:flex;align-items:center;gap:5px;padding:0 10px;border-left:1px solid var(--border);flex-shrink:0}
+.lp-isb-close{width:26px;height:26px;border:none;background:#f1f5f9;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--gray);transition:.15s;padding:0}
+.lp-isb-close:hover{background:#e2e8f0;color:var(--navy)}
+.lp-isb-body{flex:1;overflow-y:auto;padding:18px 20px;background:#fff;scrollbar-width:thin;scrollbar-color:rgba(0,0,0,.07) transparent}
+.lp-isb-body::-webkit-scrollbar{width:3px}
+.lp-isb-body::-webkit-scrollbar-thumb{background:rgba(0,0,0,.12);border-radius:99px}
+.lp-isb-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:52px 20px;gap:10px;color:#9ca3af;font-size:13px;text-align:center}
+.lp-isb-empty p{margin:0;font-weight:500}
+.lp-sb-log-list{display:flex;flex-direction:column}
+.lp-sb-log-item{display:flex;align-items:flex-start;gap:12px;padding:13px 0;border-bottom:1px solid #f1f3f5}
+.lp-sb-log-item:last-child{border-bottom:none}
+.lp-sb-log-dot{width:8px;height:8px;border-radius:50%;background:var(--orange);flex-shrink:0;margin-top:4px}
+.lp-sb-log-action{font-size:13px;font-weight:600;color:var(--navy)}
+.lp-sb-log-meta{font-size:11.5px;color:#9ca3af;margin-top:2px}
+.lp-table tr.lp-row{cursor:pointer}
+.lp-table tr.lp-row:hover td{background:#fafbfc}
+.lp-table tr.lp-row-selected td{background:#f1f5f9}
+.lp-table tr.lp-row-selected td:first-child{border-left:3px solid var(--orange)}
+.lp-table tr.lp-row:hover.lp-row-selected td{background:#fff3e6}
+.lp-action-btn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:30px;border:none;border-radius:7px;color:#334155;background:transparent;cursor:pointer;transition:.15s;font-family:inherit;padding:0;flex-shrink:0}
+.lp-action-btn:hover{background:#f1f5f9;color:var(--orange)}
+/* LP SIDEBAR DETAIL/EDIT */
+.lp-sb-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.lp-sb-field-card{background:#f8f9fb;border:1px solid #eef0f3;border-radius:10px;padding:10px 14px;display:flex;align-items:flex-start;gap:10px}
+.lp-sb-field-icon{flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#9ca3af;margin-top:1px}
+.lp-sb-field-icon svg{width:16px;height:16px}
+.lp-sb-field-content{flex:1;min-width:0}
+.lp-sb-field-label{font-size:11px;color:#9ca3af;font-weight:500;margin-bottom:5px;line-height:1}
+.lp-sb-field-value{font-size:13.5px;font-weight:600;color:#1e293b;line-height:1.3;display:flex;align-items:center}
+.lp-sb-view-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.lp-sb-section-title{font-size:13px;font-weight:700;color:var(--navy)}
+.lp-sb-emp-count{font-size:12px;color:var(--gray);font-weight:600}
+.lp-sb-edit-form{display:flex;flex-direction:column;gap:18px}
+.lp-sb-edit-section{background:#fff;border:1px solid var(--border);border-radius:12px;padding:18px 20px}
+.lp-sb-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.lp-sb-field{display:flex;flex-direction:column;gap:5px}
+.lp-sb-field label{font-size:11.5px;font-weight:600;color:var(--navy)}
+.lp-sb-form-actions{display:flex;gap:10px;justify-content:flex-end;padding-top:4px}
+.lp-sb-emp-edit{display:flex;flex-direction:column;gap:14px}
+.lp-sb-emp-actions{display:flex;gap:8px}
+/* LP SIDEBAR EMPLOYEE LIST */
+.lp-sb-emp-list{display:flex;flex-direction:column;gap:8px}
+.lp-sb-emp-item{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid #e5e7eb;border-radius:9px;padding:10px 14px;box-shadow:0 1px 4px rgba(15,23,42,.06)}
+.lp-sb-emp-avatar{width:32px;height:32px;border-radius:50%;background:var(--ol);color:var(--orange);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0;text-transform:uppercase}
+.lp-sb-emp-name{font-size:13px;color:var(--navy);font-weight:500;flex:1}
+.lp-sb-emp-remove{margin-left:auto;background:none;border:none;cursor:pointer;color:#9ca3af;font-size:18px;line-height:1;padding:2px 6px;border-radius:4px;transition:.15s;flex-shrink:0}
+.lp-sb-emp-remove:hover{color:#ef4444;background:#fee2e2}
+.lp-sb-emp-search{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:8px;padding:8px 12px;background:#fff;margin-bottom:10px;transition:.15s}
+.lp-sb-emp-search input{border:none;outline:none;font-size:13px;color:var(--navy);background:transparent;flex:1;font-family:inherit}
+.lp-sb-emp-selector{display:flex;gap:12px;flex-direction:column}
+.lp-sb-sel-pane{background:#fff;border:1px solid var(--border);border-radius:10px;padding:12px 14px;flex:1}
+.lp-sb-sel-pane-title{font-size:12px;font-weight:600;color:var(--gray);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+.lp-avail-emp-list,.lp-sb-sel-emp-list{display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto}
+.lp-avail-emp-btn{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--border);border-radius:8px;padding:8px 12px;background:#f8f9fb;cursor:pointer;transition:.15s;width:100%;text-align:left;font-family:inherit}
+.lp-avail-emp-btn:hover{border-color:var(--orange);background:#f1f5f9}
+.lp-ae-info{display:flex;flex-direction:column;gap:1px}
+.lp-ae-name{font-size:13px;color:var(--navy);font-weight:500}
+.lp-ae-key{font-size:11px;color:var(--gray)}
+.lp-ae-add{color:var(--orange);font-size:18px;font-weight:700;line-height:1}
+.lp-sb-empty{font-size:13px;color:var(--gray);padding:32px 20px;text-align:center;background:#fff;border:1px solid var(--border);border-radius:10px}
+.lp-tab-placeholder{font-size:13px;color:var(--gray);text-align:center;padding:40px 20px}
+/* POLICY FORM SECTIONS */
+.policy-form-section{padding:22px;border-bottom:1px solid #f1f3f5}
+.policy-form-section:last-child{border-bottom:0}
+.policy-section-title{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:800;color:var(--navy);margin-bottom:16px}
+.policy-section-title::before{content:'';width:3px;height:14px;border-radius:4px;background:var(--orange)}
+.policy-form-grid{display:grid;grid-template-columns:repeat(2,minmax(200px,1fr));gap:18px 22px}
+.ep-form-full{grid-column:1/-1}
+/* CUSTOM SELECT (apCS) */
+.cs-wrap{position:relative;width:100%}
+.cs-trigger{width:100%;height:42px;border:1.5px solid var(--border);border-radius:10px;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 14px;cursor:pointer;font-size:13px;color:var(--navy);font-family:inherit;outline:none;transition:.15s;box-sizing:border-box;text-align:left;gap:8px}
+.cs-trigger.cs-placeholder .cs-value{color:#b0b8c4}
+.cs-trigger.cs-open{border-color:var(--orange);box-shadow:0 0 0 2px rgba(26,26,26,.08)}
+.cs-chevron{transition:transform .2s;flex-shrink:0;color:#6b7280}
+.cs-trigger.cs-open .cs-chevron{transform:rotate(180deg)}
+.cs-dropdown{position:absolute;top:calc(100% + 6px);left:0;right:0;background:#fff;border:1.5px solid var(--border);border-radius:10px;box-shadow:0 6px 20px rgba(15,23,42,.10);z-index:300;display:none;padding:4px}
+.cs-dropdown.cs-open{display:block}
+.cs-option{padding:10px 14px;font-size:13px;color:var(--navy);cursor:pointer;border-radius:8px;display:flex;align-items:center;justify-content:space-between;transition:.1s}
+.cs-option:hover,.cs-option.cs-selected{background:#f1f5f9}
+.cs-check{flex-shrink:0;display:none;color:var(--orange)}
+.cs-option.cs-selected .cs-check{display:block}
+/* APPLICABLE EMPLOYEES */
+.ap-filter-section{margin-bottom:16px}
+.ap-filter-row{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;margin-bottom:4px}
+.ap-filter-group,.ap-filter-second{display:flex;flex-direction:column;gap:6px;flex:1;min-width:180px;max-width:320px}
+.ap-form-footer{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:16px}
+.ap-pill-btn{border-radius:99px!important}
+/* MODULE EMPLOYEE PICKER */
+.employee-picker{border:1px solid var(--border);border-radius:12px;background:#fff;overflow:hidden}
+.employee-picker-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;background:#fafbfc;border-bottom:1px solid var(--border)}
+.employee-picker-title{font-size:12px;font-weight:700;color:var(--navy)}
+.employee-picker-count{font-size:11px;font-weight:700;color:var(--orange);background:#f1f5f9;border:1px solid #d1d5db;border-radius:999px;padding:3px 9px;white-space:nowrap}
+.employee-picker-body{display:grid;grid-template-columns:1fr 1fr;gap:0;height:260px;overflow:hidden}
+.employee-list,.employee-selected{padding:12px;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+.employee-list{border-right:1px solid var(--border)}
+.employee-list-title{font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#9ca3af;margin-bottom:10px;flex-shrink:0}
+#ep-avail-emp-list{flex:1;overflow-y:auto;scrollbar-width:thin}
+.employee-selected .ep-emp-tags{flex:1;overflow-y:auto;scrollbar-width:thin}
+.employee-option{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;border:1px solid #edf0f4;background:#fff;border-radius:9px;margin-bottom:6px;cursor:pointer;font-family:inherit;text-align:left;transition:.15s}
+.employee-option:hover{border-color:#d1d5db;background:#f1f5f9}
+.employee-name{font-size:12.5px;font-weight:700;color:#111827}
+.employee-key{font-size:11px;color:#8b93a1;margin-top:1px}
+.employee-add{color:var(--orange);font-size:18px;font-weight:700;line-height:1}
+.empty-selection{font-size:12px;color:#9ca3af;line-height:1.5;padding:10px}
+.lp-page{max-width:1180px;margin:0 auto;width:100%}
+.ep-page{max-width:820px;margin:0 auto;width:100%}
+.team-form-page{max-width:820px}
+.team-form-card{border-radius:12px;box-shadow:0 1px 4px rgba(15,23,42,.05)}
+.team-form-card .policy-section-title{color:#98a2b3}
+.team-form-card .policy-section-title::before{display:none}
+.team-form-row{align-items:end}
+.team-form-links{display:inline-flex;align-items:center;gap:10px;margin-left:10px;vertical-align:middle}
+.team-form-link{font-size:11px;font-weight:500;color:var(--orange);background:none;border:none;padding:0;cursor:pointer;font-family:inherit}
+.team-form-link.muted{color:#64748b}
+.team-form-divider{border:none;border-top:1px dashed #cfd6df;margin:20px 22px 0}
+.team-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.team-section-head .policy-section-title{margin-bottom:0}
+.team-add-members{font-size:13px;font-weight:600;color:var(--navy);background:none;border:none;padding:0;cursor:pointer;font-family:inherit}
+.team-help-dot{display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;border:1.5px solid var(--orange);border-radius:50%;font-size:9px;font-weight:800;color:var(--orange);line-height:1;margin-left:3px}
+.team-form-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:4px}
+@media (max-width:720px){
+  .policy-form-grid.team-form-row{grid-template-columns:1fr}
+  .team-form-links{display:flex;margin:5px 0 0}
+  .team-form-actions{justify-content:stretch}
+  .team-form-actions button{flex:1}
+}
+/* LP LOGS TIMELINE */
+.lp-logs-wrap{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+.lp-logs-timeline{display:flex;flex-direction:column}
+.lp-log-row{display:flex;gap:10px;align-items:stretch}
+.lp-log-avatar-col{display:flex;flex-direction:column;align-items:center;flex-shrink:0;width:34px}
+.lp-log-avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:.15s}
+.lp-log-avatar--active{background:#dcfce7;color:#16a34a;border:2px solid #16a34a}
+.lp-log-avatar--inactive{background:#fee2e2;color:#ef4444;border:2px solid #ef4444}
+.lp-log-avatar--default{background:#f1f5f9;color:#64748b;border:2px solid #cbd5e1}
+.lp-log-connector{flex:1;width:2px;background:#e5e7eb;margin:3px auto;min-height:16px}
+.lp-log-card{flex:1;background:#fff;border:1px solid #eef0f3;border-radius:10px;padding:11px 13px;margin-bottom:10px;box-shadow:0 1px 4px rgba(15,23,42,.05);transition:.15s}
+.lp-log-card:hover{border-color:#d1d5db;box-shadow:0 2px 8px rgba(15,23,42,.09)}
+.lp-log-status-row{display:flex;align-items:center;gap:6px;margin-bottom:7px}
+.lp-log-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block}
+.lp-log-dot--active{background:#16a34a}
+.lp-log-dot--inactive{background:#ef4444}
+.lp-log-dot--default{background:#94a3b8}
+.lp-log-status-text{font-size:13px;font-weight:700}
+.lp-log-status-text--active{color:#16a34a}
+.lp-log-status-text--inactive{color:#ef4444}
+.lp-log-status-text--default{color:#64748b}
+/* Pending (record ingested from an external system, awaiting HR completion) and Created
+   (the record's first entry) — without these both fell through to the grey 'default' styling,
+   which read as "nothing happened" for the two entries that open every ADT-sourced timeline. */
+.lp-log-avatar--pending{background:#fdf6d8;color:#8a6d10;border:2px solid #d9b64a}
+.lp-log-dot--pending{background:#d9b64a}
+.lp-log-status-text--pending{color:#8a6d10}
+.lp-log-avatar--created{background:#f0fdfa;color:#0d9488;border:2px solid #0d9488}
+.lp-log-dot--created{background:#0d9488}
+.lp-log-status-text--created{color:#0d9488}
+.lp-log-meta-row{display:flex;align-items:center;gap:8px;font-size:11.5px;color:#64748b;flex-wrap:wrap;margin-bottom:7px}
+.lp-log-meta-item{display:flex;align-items:center;gap:3px}
+.lp-log-meta-item svg{flex-shrink:0;opacity:.65}
+.lp-log-comment-row{font-size:12.5px;color:#374151;background:#f9fafb;border-radius:7px;padding:7px 10px;line-height:1.4}
+.lp-log-comment-label{font-weight:600;color:#9ca3af;margin-right:4px;font-size:11px}
+/* LP LOGS FORM (right panel) */
+.lp-logs-form{background:#fff;border:1px solid #eef0f3;border-radius:12px;padding:16px;position:sticky;top:0;box-shadow:0 1px 6px rgba(15,23,42,.06)}
+.lp-logs-form-header{display:flex;align-items:center;gap:7px;font-size:14px;font-weight:700;color:#1e293b;margin-bottom:3px}
+.lp-logs-form-sub{font-size:11.5px;color:#9ca3af;margin:0 0 14px;line-height:1.4}
+.lp-logs-form-label{font-size:11.5px;font-weight:600;color:#1e293b;display:flex;align-items:center;gap:3px;margin-bottom:5px}
+.lp-logs-form-req{color:#ef4444;font-size:12px}
+.lp-logs-form-sel-wrap{position:relative;margin-bottom:12px}
+.lp-logs-form-sel-wrap svg{position:absolute;right:11px;top:50%;transform:translateY(-50%);pointer-events:none;color:#9ca3af}
+.lp-logs-form-select{width:100%;height:40px;padding:0 34px 0 12px;border:1.5px solid #e2e8f0;border-radius:9px;font-family:inherit;font-size:13px;color:#1e293b;background:#fff;outline:none;appearance:none;cursor:pointer;transition:.15s;box-sizing:border-box}
+.lp-logs-form-select:focus{border-color:var(--orange);box-shadow:0 0 0 2px rgba(26,26,26,.09)}
+.lp-logs-form-textarea{width:100%;height:88px;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:9px;font-family:inherit;font-size:13px;color:#1e293b;background:#fff;outline:none;resize:none;line-height:1.5;transition:.15s;box-sizing:border-box;margin-bottom:12px}
+.lp-logs-form-textarea:focus{border-color:var(--orange);box-shadow:0 0 0 2px rgba(26,26,26,.09)}
+.lp-logs-form-textarea::placeholder{color:#b0b8c4}
+.lp-logs-save-btn{width:100%;height:40px;background:var(--orange);color:#fff;border:none;border-radius:99px;font-family:inherit;font-size:13.5px;font-weight:700;cursor:pointer;transition:.15s;letter-spacing:.01em}
+.lp-logs-save-btn:hover{opacity:.9;transform:translateY(-1px);box-shadow:0 4px 12px rgba(26,26,26,.25)}
+.lp-logs-save-btn:active{transform:none}
+.lp-logs-empty{font-size:13px;color:#9ca3af;text-align:center;padding:32px 16px;background:#f9fafb;border-radius:10px;border:1px dashed #e5e7eb}
+/* LP WORKFLOW TIMELINE */
+.lp-wf-wrap{display:flex;flex-direction:column}
+.lp-wf-row{display:flex;gap:16px;align-items:stretch}
+.lp-wf-dot-col{display:flex;flex-direction:column;align-items:center;flex-shrink:0;width:12px;padding-top:16px}
+.lp-wf-dot{width:11px;height:11px;border-radius:50%;background:#3b82f6;border:2px solid #bfdbfe;flex-shrink:0;box-shadow:0 0 0 3px #eff6ff}
+.lp-wf-connector{flex:1;width:2px;background:#bfdbfe;margin:5px auto;min-height:12px}
+.lp-wf-card{flex:1;background:#fff;border:1px solid #e9edf2;border-radius:10px;padding:14px 16px;margin-bottom:12px;box-shadow:0 1px 4px rgba(15,23,42,.05);transition:.15s}
+.lp-wf-card:hover{border-color:#bfdbfe;box-shadow:0 2px 10px rgba(59,130,246,.09)}
+.lp-wf-title{font-size:14px;font-weight:700;color:#1e293b;margin-bottom:7px}
+.lp-wf-meta-row{display:flex;align-items:center;gap:10px;font-size:12px;color:#64748b;flex-wrap:wrap;margin-bottom:10px}
+.lp-wf-meta-item{display:flex;align-items:center;gap:3px}
+.lp-wf-meta-item svg{flex-shrink:0;opacity:.6}
+.lp-wf-meta-sep{color:#cbd5e1;font-size:13px;line-height:1}
+.lp-wf-desc{font-size:12.5px;line-height:1.5}
+.lp-wf-desc-label{font-weight:700;color:#374151;margin-right:3px}
+.lp-wf-desc-text{color:#3b82f6}
+.lp-wf-empty{font-size:13px;color:#9ca3af;text-align:center;padding:32px 16px;background:#f9fafb;border-radius:10px;border:1px dashed #e5e7eb}
+.ct-action-wrap{position:relative;display:flex;align-items:center;justify-content:flex-end;gap:8px;width:100%;vertical-align:middle}
+.ct-action-btn{background:var(--orange);color:#fff;border:none;border-radius:8px;padding:0 10px 0 12px;height:28px;line-height:28px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;font-family:inherit;white-space:nowrap;min-width:88px;justify-content:center;transition:.15s;vertical-align:middle}
+.ct-action-btn span{overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.ct-action-btn:hover{background:#c76d08}
+.ct-dots-btn{border:none;background:transparent;border-radius:6px;width:28px;height:28px;line-height:28px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;color:#64748b;padding:0;transition:.15s;flex-shrink:0;vertical-align:middle}
+.ct-dots-btn:hover{background:#f1f5f9;color:var(--navy)}
+.ct-action-menu{position:fixed;background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 28px rgba(15,23,42,.13);z-index:1000;min-width:200px;overflow:hidden;display:none}
+.ct-action-menu.open{display:block}
+.ct-act-item{padding:9px 14px;font-size:12.5px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:9px;color:var(--navy);transition:.12s;border-bottom:1px solid #f1f5f9}
+.ct-act-item:last-child{border-bottom:none}
+.ct-act-item:hover:not(.done):not(.current){background:#f1f5f9;color:var(--orange)}
+.ct-act-item.current{color:var(--orange);font-weight:700;background:#f1f5f9;cursor:default}
+.ct-act-item.done{color:#9ca3af;cursor:default}
+.ct-act-step{width:19px;height:19px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex-shrink:0}
+.ct-act-step.done{background:#dcfce7;color:#16a34a}
+.ct-act-step.current{background:var(--orange);color:#fff}
+.ct-act-step.next{background:#f1f5f9;color:#64748b}
+.ct-sb-badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;border:1.5px solid currentColor;white-space:nowrap}
+/* ONE FORMULA FOR THE WHOLE FAMILY: a soft tint, a mid-weight border of the same hue, and the
+   saturated hue as text. Green = moving, blue = cleared a gate, purple = onboarding, teal =
+   payroll-ready, red = stopped. Two members were breaking it. Submitted drew its border at full
+   saturation while every other green drew it soft, so the first row of a fresh table looked
+   subtly heavier than the rows under it for no reason a reader could act on. And CONTRACT SIGNED
+   had no rule at all — `border:1.5px solid currentColor` on the base class meant it fell back to
+   the inherited near-black, rendering the one status that says the client actually signed as an
+   unstyled outline. It is blue: signing is the step that clears the gate the approvals sit on. */
+.ct-sb-badge.submitted{color:#16a34a;border-color:#86efac;background:#f0fdf4}
+.ct-sb-badge.quotation-approved,.ct-sb-badge.proposal-approved,.ct-sb-badge.contract-approved,.ct-sb-badge.contract-signed{color:#2563eb;border-color:#93c5fd;background:#eff6ff}
+.ct-sb-badge.proposal-sent,.ct-sb-badge.contract-sent{color:#16a34a;border-color:#86efac;background:#f0fdf4}
+.ct-sb-badge.inactive{color:#ef4444;border-color:#fca5a5;background:#fef2f2}
+/* The tail of ctFlow had no styles, so a contract that had actually got somewhere rendered in the
+   inherited text colour while a freshly submitted one was green. Active is the terminal state the
+   contract journey writes; the two before it are the steps that lead to it.
+
+   ACTIVE IS A TINT LIKE EVERY OTHER STATUS. It was solid green on white text — the only filled
+   badge in the family — which made the terminal state shout down a column whose whole job is to
+   be scanned for the row that needs attention, and the one row nobody has to act on was the
+   loudest thing on the page. It still has to be distinguishable from Proposal Sent and Contract
+   Sent, which are also green, so it separates by DEPTH inside the shared formula: a firmer fill
+   and a firmer border than theirs, not a different shape. */
+.ct-sb-badge.active{color:#15803d;border-color:#4ade80;background:#dcfce7}
+.ct-sb-badge.onboarding{color:#7c3aed;border-color:#ddd6fe;background:#faf5ff}
+.ct-sb-badge.ready-for-payroll{color:#0f766e;border-color:#99f6e4;background:#f0fdfa}
+/* Replaced by a later placement. Grey rather than red: it is not an error and it did not fail —
+   it is the previous contract for this person, kept for its documents and history. Without a rule
+   of its own it inherited the bare badge and read as live, which is the one thing it is not. */
+.ct-sb-badge.superseded{color:#64748b;border-color:#cbd5e1;background:#f1f5f9}
+/* The row the contract journey just created, so "View contract" lands on something findable
+   rather than on a table the user has to search. */
+.ct-row.ccj-new-row>td{background:#f0fdf4}
+.ct-row.ccj-new-row>td:first-child{box-shadow:inset 3px 0 0 #16a34a}
+.ct-pending-stats{display:flex;gap:0;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff;flex-shrink:0}
+.ct-pending-stat{padding:12px 22px;text-align:center;border-right:1px solid var(--border)}
+.ct-pending-stat:last-child{border-right:none}
+.ct-pending-count{font-size:22px;font-weight:800;line-height:1}
+.ct-pending-label{font-size:11px;font-weight:500;color:#64748b;margin-top:3px;white-space:nowrap}
+.ct-upload-area{border:2px dashed #d1d5db;border-radius:10px;padding:22px 16px;text-align:center;cursor:pointer;transition:.15s;background:#fafbfc;margin-bottom:10px}
+.ct-upload-area:hover{border-color:var(--orange);background:#f1f5f9}
+.ct-upload-area p{font-size:12px;color:#64748b;margin:4px 0 0;line-height:1.4}
+.ct-modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:500;display:flex;align-items:center;justify-content:center}
+.ct-modal{background:#fff;border-radius:16px;padding:28px;width:min(560px,92vw);max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(15,23,42,.22);scrollbar-width:thin}
+.ct-modal-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+.ct-modal-title{font-size:16px;font-weight:700;color:var(--navy)}
+.ct-modal-close{width:28px;height:28px;border:none;background:#f1f5f9;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#64748b;padding:0}
+.ct-modal-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+.ct-modal-field{background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:10px 14px}
+.ct-modal-flabel{font-size:11px;color:#9ca3af;font-weight:500;margin-bottom:3px}
+.ct-modal-fval{font-size:13px;font-weight:600;color:var(--navy)}
+.ct-search-input{flex:1;min-width:160px;padding:8px 14px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;color:var(--navy);outline:none;background:#fff;transition:.15s}
+.ct-search-input:focus{border-color:var(--orange);box-shadow:0 0 0 2px rgba(26,26,26,.1)}
+.ct-search-input::placeholder{color:#9ca3af}
+/* LP PAGINATION */
+.lp-pagination{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-top:1px solid var(--border);background:#fff}
+.lp-pagination-info{font-size:12.5px;color:#6b7280}
+.lp-pagination-controls{display:flex;align-items:center;gap:4px}
+.lp-pg-btn{min-width:32px;height:32px;padding:0 8px;border:1px solid #e2e8f0;border-radius:7px;background:#fff;font-size:13px;font-weight:500;color:#374151;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;transition:.15s}
+.lp-pg-btn:hover:not(:disabled){border-color:var(--orange);color:var(--orange);background:#f1f5f9}
+.lp-pg-btn.active{background:var(--orange);color:#fff;border-color:var(--orange);font-weight:700}
+.lp-pg-btn:disabled{opacity:.4;cursor:default}
+.lp-pg-arrow{color:#64748b}
+
+/* -- Client: master-detail behaviour --------------------------------------------------
+   The shared split view overlays a 68%-wide drawer on top of the listing. Client's table
+   has nine columns, so what stayed uncovered was three clipped columns — unreadable, and no
+   help in choosing a different record. With a record selected the listing collapses to an
+   identity-only list sized for the strip that remains. */
+/* The listing narrows to exactly the strip the drawer leaves free, so a row's hover and
+   selection highlight stop at the panel edge instead of running underneath it. */
+.md-split--compact .lp-split-main{width:29%;overflow-x:hidden}
+.md-split-sb.open{width:70%}
+.md-row--compact{cursor:pointer;transition:background .12s}
+.md-row--compact td{padding:11px 14px;border-bottom:1px solid #f1f5f9}
+.md-row--compact:hover{background:#f8fafc}
+.md-row--compact.lp-row-selected{background:#f0fdfa}
+.md-compact-cell{display:flex;align-items:center;gap:9px;min-width:0}
+.md-compact-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.md-compact-name{font-size:13px;font-weight:600;color:var(--navy);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.md-compact-meta{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;
+  color:var(--gray);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Below this the strip is too narrow to be worth keeping, so the drawer takes the full width
+   and the listing is simply hidden while a record is open. */
+@media (max-width:900px){
+  .md-split-sb.open{width:100%}
+  .md-split--compact .lp-split-main{visibility:hidden}
+}
+
+/* -- Shared listing header (Client, My Runs) -------------------------------------------------------------
+   The same two-part head every other listing uses: the "Select Filter" bar takes the free space
+   on the left, the quick status tiles sit flush right. align-items:flex-start so the tiles align
+   to the top of the bar rather than stretching when the filter row wraps to two lines. */
+.listing-head{display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:4px}
+/* Refresh matches the height and pill geometry of the Reset/Search buttons it sits beside, so the
+   filter row reads as one row of controls rather than a row plus an afterthought. */
+.md-refresh{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:20px;
+  border:1px solid var(--border);background:#fff;color:var(--navy);font-size:12.5px;font-weight:600;
+  font-family:inherit;cursor:pointer;flex-shrink:0;transition:.15s}
+.md-refresh:hover{background:var(--ol);border-color:#cbd5e1}
+.md-refresh svg{flex-shrink:0}
+/* The tiles are a filter, so the whole tile is the hit area and the selected one is pinned by the
+   underline the other listings use. Total has no status of its own — it is the cleared state. */
+.listing-head .listing-stat{padding:11px 20px;min-width:84px}
+@media (max-width:760px){
+  .md-refresh{padding:0 11px}
+  .md-refresh span{display:none}
+  .listing-head .listing-stat{padding:10px 14px;min-width:70px}
+}
+
+/* -- Client: status-save progress ------------------------------------------------------
+   While a status change is in flight the form is replaced by these three steps — the same work
+   the backend does in one transaction (row update, audit entry, workflow event). A disabled form
+   would still invite interaction and would say nothing about what is happening server-side. */
+.md-save-panel{animation:md-fade-in .2s ease-out}
+.md-save-steps{margin-top:14px}
+.md-save-step{display:flex;gap:11px;align-items:flex-start}
+.md-save-rail{display:flex;flex-direction:column;align-items:center;flex-shrink:0;width:20px}
+.md-save-dot{width:18px;height:18px;border-radius:50%;border:2px solid var(--border);background:#fff;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:.25s}
+.md-save-line{width:2px;flex:1;min-height:18px;background:var(--border);margin:2px 0;transition:.25s}
+.md-save-body{padding-bottom:14px;min-width:0;flex:1}
+.md-save-title{font-size:12.5px;font-weight:600;color:#9ca3af;transition:.25s}
+.md-save-note{font-size:11.5px;color:var(--gray);margin-top:2px;line-height:1.45;
+  animation:md-fade-in .25s ease-out}
+.md-save-step.is-active .md-save-dot{border-color:var(--navy);background:var(--navy)}
+.md-save-step.is-active .md-save-title{color:var(--navy)}
+.md-save-step.is-done .md-save-dot{border-color:#0d9488;background:#0d9488}
+.md-save-step.is-done .md-save-line{background:#0d9488}
+.md-save-step.is-done .md-save-title{color:var(--navy)}
+.md-save-spin{width:8px;height:8px;border-radius:50%;border:2px solid rgba(255,255,255,.35);
+  border-top-color:#fff;animation:md-spin .7s linear infinite}
+@keyframes md-spin{to{transform:rotate(360deg)}}
+@keyframes md-fade-in{from{opacity:0}to{opacity:1}}
+
+/* The entry just written slides in, so the result of Save is something you watch happen rather
+   than something that is simply already there on the next frame. */
+@keyframes md-log-in{
+  from{opacity:0;transform:translateY(-10px)}
+  to{opacity:1;transform:translateY(0)}
+}
+.md-log-enter{animation:md-log-in .42s cubic-bezier(.16,1,.3,1)}
+.md-log-enter .lp-log-card{box-shadow:0 0 0 2px rgba(13,148,136,.25);transition:box-shadow .8s ease-out .4s}
+.md-save-header{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.md-save-from{color:var(--gray);font-weight:500}
+.md-save-arrow{color:#cbd5e1;flex-shrink:0}
+
+/* == COMPLIANCE DOCUMENTS ====================================================================
+   The Compliance Items header carries its own upload control, so the heading is a flex row here
+   rather than the plain .ep-form-title used elsewhere in the drawer. Everything below it styles
+   the generated document sheet, which is deliberately paper-like: a document that opens looking
+   like a web panel does not read as a document.
+   ============================================================================================ */
+.ct-docs-head{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  margin:0 0 12px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+.ct-docs-head-t{font-size:14px;font-weight:700;color:var(--navy)}
+.ct-docs-add{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.ct-docs-add-btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border:1px solid var(--border);
+  border-radius:8px;background:#fff;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--navy);
+  cursor:pointer;transition:.15s;white-space:nowrap}
+.ct-docs-add-btn:hover{border-color:var(--navy);background:#f8fafc}
+.ct-docs-add-row{display:flex;align-items:center;gap:6px}
+.ct-docs-add-name{width:190px;padding:7px 11px;border:1px solid var(--border);border-radius:8px;
+  font-family:inherit;font-size:12.5px;color:var(--navy);outline:none;background:#fff;transition:.15s}
+.ct-docs-add-name:focus{border-color:var(--navy);box-shadow:0 0 0 2px rgba(15,23,42,.08)}
+.ct-docs-add-name::placeholder{color:#9ca3af}
+.ct-docs-add-up{display:inline-flex;align-items:center;justify-content:center;width:34px;height:33px;
+  border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--navy);cursor:pointer;
+  padding:0;transition:.15s;flex-shrink:0}
+.ct-docs-add-up:hover{border-color:var(--navy);background:#f8fafc}
+
+/* A filed document is a link to that document, not a label that happens to be green. */
+.ct-doc-link{display:inline-flex;align-items:center;gap:5px;border:none;background:none;padding:0;
+  font-family:inherit;font-size:12px;font-weight:600;color:#16a34a;cursor:pointer;text-align:left}
+.ct-doc-link span{border-bottom:1px solid transparent;transition:.15s}
+.ct-doc-link:hover span{border-bottom-color:#16a34a}
+
+/* Above the contract drawer, which is why this clears .ct-modal-overlay's 500. */
+.ct-doc-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:620;display:none;
+  align-items:center;justify-content:center;padding:26px;animation:fadeIn .18s ease}
+.ct-doc-panel{background:#fff;border-radius:14px;width:min(820px,94vw);max-height:92vh;display:flex;
+  flex-direction:column;overflow:hidden;box-shadow:0 24px 70px rgba(15,23,42,.3)}
+.ct-doc-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 18px;
+  border-bottom:1px solid var(--border);background:#f8fafc;flex-shrink:0}
+.ct-doc-bar-n{font-size:13px;font-weight:700;color:var(--navy);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ct-doc-scroll{overflow-y:auto;padding:26px;background:#eef1f6;scrollbar-width:thin}
+.ct-doc-raw{display:flex;justify-content:center}
+.ct-doc-raw img{max-width:100%;border-radius:8px;box-shadow:0 6px 22px rgba(15,23,42,.16)}
+.ct-doc-raw iframe{width:100%;height:70vh;border:none;border-radius:8px;background:#fff}
+.ct-doc-raw-file{flex-direction:column;align-items:center;gap:12px;background:#fff;border-radius:10px;
+  padding:40px 26px;text-align:center}
+.ct-doc-raw-name{font-size:14px;font-weight:700;color:var(--navy);word-break:break-all}
+.ct-doc-raw-file p{font-size:12.5px;color:var(--gray);max-width:380px;line-height:1.55}
+
+/* THE SHEET */
+.ct-sheet{background:#fff;padding:44px 46px 34px;border-radius:4px;box-shadow:0 8px 30px rgba(15,23,42,.14);
+  color:var(--navy);font-size:12.5px;line-height:1.6}
+.ct-sheet-lh{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;
+  padding-bottom:16px;border-bottom:2px solid var(--navy)}
+.ct-sheet-brand{display:flex;align-items:flex-start;gap:11px}
+.ct-sheet-brand img{height:26px;width:auto;display:block;flex-shrink:0}
+.ct-sheet-org{font-size:13px;font-weight:800;color:var(--navy);letter-spacing:-.1px}
+.ct-sheet-addr{font-size:10px;color:var(--gray);margin-top:2px;line-height:1.5}
+.ct-sheet-stamp{flex-shrink:0;border:1.5px solid #16a34a;color:#16a34a;border-radius:4px;padding:4px 11px;
+  font-size:10px;font-weight:800;letter-spacing:1.1px;text-transform:uppercase;transform:rotate(-3deg)}
+.ct-sheet-title{font-size:19px;font-weight:800;letter-spacing:-.3px;margin:24px 0 14px}
+.ct-sheet-meta{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--border);
+  border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:26px}
+.ct-sheet-m{background:#f8fafc;padding:8px 11px}
+.ct-sheet-m span{display:block;font-size:9.5px;font-weight:600;color:var(--gray);text-transform:uppercase;letter-spacing:.5px}
+.ct-sheet-m b{display:block;font-size:12px;font-weight:700;margin-top:2px;word-break:break-word}
+.ct-sheet-sec{margin-bottom:22px}
+.ct-sheet-sec-t{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.9px;color:var(--gray);
+  padding-bottom:6px;margin-bottom:10px;border-bottom:1px solid var(--border)}
+.ct-sheet-rows{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 26px}
+.ct-sheet-row{display:flex;justify-content:space-between;gap:14px;padding:4px 0;border-bottom:1px dotted #e2e8f0}
+.ct-sheet-row span{color:var(--gray);flex-shrink:0}
+.ct-sheet-row b{font-weight:700;text-align:right;word-break:break-word}
+.ct-sheet-p{margin-bottom:9px;text-align:justify;color:#334155}
+.ct-sheet-p:last-child{margin-bottom:0}
+.ct-sheet-tbl{width:100%;border-collapse:collapse;font-size:11.5px}
+.ct-sheet-tbl th{text-align:left;font-weight:700;color:var(--gray);font-size:9.5px;text-transform:uppercase;
+  letter-spacing:.5px;padding:6px 9px;background:#f8fafc;border-bottom:1px solid var(--border)}
+.ct-sheet-tbl td{padding:7px 9px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+.ct-sheet-tbl tr:last-child td{border-bottom:none}
+.ct-sheet-num{text-align:right;font-weight:700;white-space:nowrap}
+.ct-sheet-ok{color:#16a34a;font-weight:700}
+.ct-sheet-tot td{border-top:1.5px solid var(--navy);border-bottom:none;font-weight:800;padding-top:9px}
+.ct-sheet-sign{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:26px;margin-top:34px}
+.ct-sheet-sign-l{font-family:'Georgia',serif;font-style:italic;font-size:17px;color:#1e3a8a;
+  padding-bottom:5px;border-bottom:1px solid var(--navy)}
+.ct-sheet-sign-r{font-size:10.5px;color:var(--gray);margin-top:5px;line-height:1.45}
+.ct-sheet-sign-d{font-size:10px;color:#9ca3af;margin-top:3px}
+.ct-sheet-foot{display:flex;justify-content:space-between;gap:12px;margin-top:30px;padding-top:11px;
+  border-top:1px solid var(--border);font-size:9.5px;color:#9ca3af}
+@media(max-width:640px){
+  .ct-sheet{padding:26px 20px}
+  .ct-sheet-meta{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ct-sheet-rows,.ct-sheet-sign{grid-template-columns:1fr}
+  .ct-docs-head{flex-direction:column;align-items:flex-start}
+}

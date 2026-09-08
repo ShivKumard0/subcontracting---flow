@@ -1,0 +1,12 @@
+{
+  "name": "executivelayer-employee-storage-backend",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Zero-dependency storage backend for Direct Employee master data (Node built-in http + node:sqlite), plus a mock NewForce Solutions site to integrate against. Not the production backend - see README.md.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "mock-adt": "node mock-adt-server.js",
+    "dev": "node dev.js"
+  }
+}

@@ -1,0 +1,342 @@
+/* ===== ACCOUNT MANAGER — DEAL DESK ===========================================
+   Three bands and nothing else: header (who I am), rail (where everything is),
+   listing (what to do next). The header carries no figures — the rail counts the
+   same records by stage a few inches below it, and one set of counts per page.
+
+   The rail divides the available width with flex instead of laying out fixed-width
+   cards in a scroller. That is a correctness property, not a style choice: a nine
+   stage sequence whose last two stages sit off-screen is not readable as a
+   sequence, and no amount of scroll affordance fixes that. Flex division means it
+   fits at any viewport by construction.
+
+   The listing carries no min-width for the same reason. Six columns chosen from
+   what an Account Manager triages on; value, dates and identifiers live in the
+   drawer, because they are things you look up about one record, not things you
+   scan across twenty.
+
+   ----- status colour ------------------------------------------------------
+   Statuses are monochrome. Amber, green, red, blue and purple all carried real
+   meaning individually and none of it survived contact with the others: a table
+   row could show a green stage pill, an amber sub-status chip, a red age and a
+   green action button at once, which is four alarms and therefore none. The page
+   now has one ink scale, and the three steps below are the whole vocabulary.
+   Emphasis is weight and darkness, not hue. */
+:root{
+  --am-quiet-bg:#f8fafc;   /* nothing to say — upcoming, empty, inert */
+  --am-tint-bg:#f1f5f9;    /* the default status ground */
+  --am-tint-line:#e2e8f0;
+  --am-tint-ink:#475569;
+  --am-strong-bg:#e2e8f0;  /* the one that wants you — late, gate, blocked */
+  --am-strong-line:#cbd5e1;
+}
+
+.am-page{display:flex;flex-direction:column;gap:16px;min-width:0;width:100%}
+
+/* ----- header: who this queue belongs to, and nothing else ----- */
+.am-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;flex-wrap:wrap}
+.am-head-title{font-size:19px;font-weight:800;color:var(--navy);letter-spacing:-.3px;line-height:1.2;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.am-head-role{font-size:10.5px;font-weight:700;color:var(--gray);background:var(--am-tint-bg);border:1px solid var(--border);border-radius:20px;padding:3px 10px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap}
+.am-head-sub{font-size:12px;color:var(--gray);margin-top:5px;line-height:1.5}
+
+/* ----- the rail ----- */
+.am-bar-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px}
+.am-bar{display:flex;align-items:stretch;min-width:0}
+/* All that marks the change of character between the two halves now the headings are gone. */
+.am-bar-div{width:17px;flex:0 0 17px;display:flex;align-items:center;justify-content:center}
+.am-bar-div::before{content:'';width:0;height:70%;border-left:1.5px dashed #cbd5e1}
+.am-bar-group{display:flex;align-items:stretch;gap:5px;min-width:0}
+
+/* flex:1 + min-width:0 is what guarantees nine segments always fit */
+.am-seg{flex:1 1 0;min-width:0;position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:9px 10px 10px;border:1.5px solid var(--border);border-radius:9px;background:#fff;cursor:pointer;font-family:inherit;text-align:left;overflow:hidden;transition:.15s}
+.am-seg:hover{border-color:#94a3b8;background:#fafbfc}
+/* The accent strip is one grey for all nine stages. Colour-coding the tones told the reader
+   a stage was "good" or "bad" when the only thing a stage is, is later or earlier. */
+.am-seg-bar{position:absolute;top:0;left:0;right:0;height:3px;background:var(--am-strong-line)}
+/* Just the count now — the ordinal badge and the C / G corner flags are gone from the markup,
+   so the row has nothing to distribute and no `gap` to reserve for them. */
+.am-seg-top{display:flex;align-items:center;width:100%;min-width:0}
+.am-seg-count{font-size:19px;font-weight:800;color:var(--navy);line-height:1.1}
+.am-seg-label{font-size:10.5px;font-weight:600;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;line-height:1.3}
+.am-seg.empty{background:var(--am-quiet-bg)}
+.am-seg.empty .am-seg-count{color:var(--am-strong-line)}
+.am-seg.empty .am-seg-label{color:#9ca3af}
+/* Selection is the border and the ring alone now that the numbered chip it used to fill
+   is gone — which is enough, since only one segment can carry it at a time. */
+.am-seg.selected{border-color:var(--navy);background:#f8fafc;box-shadow:0 0 0 2.5px rgba(15,23,42,.07)}
+.am-seg.selected .am-seg-bar{background:var(--navy)}
+
+/* ----- listing ----- */
+.am-list-block{display:flex;flex-direction:column;gap:11px;min-width:0}
+.am-list-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.am-list-title{font-size:15px;font-weight:800;color:var(--navy);line-height:1.3}
+.am-list-sub{font-size:11.5px;color:var(--gray);margin-top:3px;line-height:1.5}
+.am-list-right{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.am-list-count{font-size:11px;font-weight:700;color:var(--gray);background:var(--am-tint-bg);border-radius:20px;padding:4px 11px;white-space:nowrap}
+
+/* no min-width: the table is sized by its colgroup and never overflows */
+.am-table{min-width:0;table-layout:fixed}
+.am-table td,.am-table th{padding:11px 14px}
+/* table-layout:fixed does not stop a nowrap heading painting over the next column — this does. */
+.am-table th{overflow:hidden;text-overflow:ellipsis}
+.am-table td{vertical-align:middle}
+.am-c-client{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.am-table .cell-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+/* Late is said in weight, not in red: the number goes to full black and the row grows a
+   "Too long" line under it. The words were always doing the work anyway. */
+.am-c-age{font-size:13px;font-weight:700;color:var(--gray)}
+.am-c-age.breach{color:var(--navy);font-weight:800}
+.am-c-late{color:var(--navy)!important;font-weight:700}
+/* With the drawer open only a narrow strip of the table is visible, so the columns
+   that cannot be read in it are dropped rather than clipped mid-word. */
+/* Keeps Client, Where it is now and What to do next — you can still pick the next record and
+   still act on it from the strip the drawer leaves free. */
+
+/* ----- record drawer ----- */
+.am-sb-internal{margin-top:14px;padding:12px 14px;border-radius:9px;background:#f8fafc;border:1px solid var(--border);font-size:12px;color:var(--navy);line-height:1.55}
+.am-sb-internal-label{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--gray);margin-bottom:4px}
+.am-cv-intro{font-size:11.5px;color:var(--gray);line-height:1.55;margin-bottom:16px}
+.am-cv-list{display:flex;flex-direction:column}
+.am-cv-row{display:grid;grid-template-columns:24px minmax(0,1fr);gap:12px}
+.am-cv-markcol{display:flex;flex-direction:column;align-items:center}
+.am-cv-mark{width:23px;height:23px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;background:var(--am-tint-bg);color:var(--gray);border:1.5px solid var(--border);flex-shrink:0}
+.am-cv-line{flex:1;width:1.5px;min-height:12px;background:var(--border);margin:4px 0}
+.am-cv-body{padding-bottom:16px;min-width:0}
+.am-cv-label{font-size:12.5px;font-weight:700;color:var(--navy);display:flex;align-items:center;gap:7px;flex-wrap:wrap;line-height:1.4}
+.am-cv-sub{font-size:11px;color:var(--gray);margin-top:3px;line-height:1.5}
+/* Done and current are both filled, and the ring is what separates them — done is mid-grey
+   and settled, current is black with a halo. Two greys read as a sequence; green and navy
+   read as two unrelated states. */
+.am-cv-row.done .am-cv-mark{background:#64748b;border-color:#64748b;color:#fff}
+.am-cv-row.done .am-cv-line{background:var(--am-strong-line)}
+.am-cv-row.current .am-cv-mark{background:var(--navy);border-color:var(--navy);color:#fff;box-shadow:0 0 0 3px rgba(15,23,42,.1)}
+.am-cv-row.current .am-cv-label{font-weight:800}
+.am-cv-row.current .am-cv-sub{color:var(--navy);font-weight:600}
+.am-cv-row.upcoming .am-cv-label{color:var(--gray);font-weight:600}
+
+@media(max-width:1100px){
+  .am-seg-label{font-size:10px}
+  .am-seg{padding:8px 7px 9px}
+  .am-seg-count{font-size:17px}
+}
+@media(max-width:880px){
+  .am-head{align-items:stretch;flex-direction:column;gap:14px}
+  .am-list-head{align-items:flex-start;flex-direction:column;gap:10px}
+}
+
+/* ===== ADMIN SUB-STATUSES ====================================================
+   Internal layer. Every surface that carries it is marked, because the parent
+   stage is client-facing and the sub-steps under it are not. */
+.am-th-int{display:inline-block;margin-left:5px;font-size:8.5px;font-weight:800;letter-spacing:.4px;color:var(--am-tint-ink);background:var(--am-tint-bg);border:1px solid var(--am-tint-line);border-radius:20px;padding:1px 6px;text-transform:uppercase;vertical-align:middle}
+.am-int-chip{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;padding:3px 8px;border-radius:20px;background:var(--am-tint-bg);color:var(--am-tint-ink);border:1px solid var(--am-tint-line);white-space:nowrap}
+/* Internal vs client-facing is the one distinction worth keeping visible here, so it is
+   carried by fill weight — client-facing sits on the darker ground. */
+.am-int-chip.client{background:var(--am-strong-bg);color:var(--navy);border-color:var(--am-strong-line)}
+
+/* listing cell */
+
+/* drawer: sub-status + logs tabs */
+.am-sb-advance{margin-top:7px;padding:5px 13px;border:none;border-radius:7px;background:var(--navy);color:#fff;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;transition:.15s}
+.am-sb-advance:hover{background:#1e293b}
+.am-sb-waiting{margin-top:7px;font-size:11px;font-weight:600;color:var(--am-tint-ink);background:var(--am-tint-bg);border:1px solid var(--am-tint-line);border-radius:7px;padding:5px 10px;display:inline-block}
+.am-log-stage-head{display:flex;align-items:center;gap:8px;margin:14px 0 10px;font-size:11px;font-weight:800;color:var(--navy);text-transform:uppercase;letter-spacing:.4px}
+.am-log-stage-head:first-child{margin-top:0}
+.am-log-stage-n{width:18px;height:18px;border-radius:50%;background:var(--navy);color:#fff;font-size:9.5px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.am-log-stage-sla{margin-left:auto;font-size:9.5px;font-weight:600;color:var(--gray);text-transform:none;letter-spacing:0}
+/* new two-line sub-status cell: parent stage pill above, live sub-status below */
+.am-sub-parent{display:flex;align-items:center;min-width:0}
+
+/* ===== PLAIN-LANGUAGE LAYER ==================================================
+   Everything added so a first-time user can work the page without training. */
+
+/* "Where it is now" — read-only, three lines, no popover */
+.am-where{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:0}
+/* One pill, one ground. The stage-tone classes amBadgeClass still emits (approved / pending /
+   expired) all resolve to the base now; only `inactive` — the stalled stages — is darkened,
+   because that is the single case where the pill itself is the thing to notice. */
+.am-sub-pill{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.35px;padding:2px 8px;border-radius:20px;background:var(--am-tint-bg);color:var(--am-tint-ink);border:1px solid var(--am-tint-line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.am-sub-pill.inactive{background:var(--am-strong-bg);color:var(--navy);border-color:var(--am-strong-line)}
+.am-where-step{font-size:12.5px;font-weight:700;color:var(--navy);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.am-where-prog{font-size:10.5px;color:var(--gray)}
+
+/* "What to do next" — one control per row, or plain text when it is not yours */
+.am-act{display:inline-flex;align-items:center;gap:6px;font-family:inherit;white-space:nowrap;max-width:100%}
+/* Solid black is "you can finish this"; outlined is "you can only nudge someone else". The
+   hierarchy that green-vs-amber was carrying is carried by fill instead. */
+button.am-act{padding:6px 13px;border-radius:8px;border:1.5px solid transparent;font-size:11.5px;font-weight:700;cursor:pointer;transition:.15s}
+button.am-act.do{background:var(--navy);border-color:var(--navy);color:#fff}
+button.am-act.do:hover{background:#1e293b;border-color:#1e293b}
+button.am-act.chase{background:#fff;border-color:var(--am-strong-line);color:var(--navy)}
+button.am-act.chase:hover{background:var(--am-tint-bg)}
+.am-act.wait{font-size:11.5px;color:#94a3b8;font-weight:600;overflow:hidden;text-overflow:ellipsis}
+
+/* drawer: plain summary + the next-action card at the top of Logs */
+.am-sb-plain{font-size:12px;color:var(--gray);line-height:1.6;margin:-6px 0 14px}
+.am-sb-next{border:1.5px solid var(--am-strong-line);background:var(--am-quiet-bg);border-radius:11px;padding:13px 15px;margin-bottom:18px}
+.am-sb-next-kicker{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--navy);margin-bottom:5px}
+.am-sb-next-step{font-size:14px;font-weight:800;color:var(--navy);line-height:1.3;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.am-sb-next-meta{font-size:11px;color:var(--gray);margin-top:4px;line-height:1.5}
+.am-sb-advance{margin-top:11px;padding:7px 15px;border:none;border-radius:8px;background:var(--navy);color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;transition:.15s}
+.am-sb-advance:hover{background:#1e293b}
+.am-sb-chase{margin-top:11px;padding:7px 15px;border:1.5px solid var(--am-strong-line);border-radius:8px;background:#fff;color:var(--navy);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;transition:.15s}
+.am-sb-chase:hover{background:var(--am-tint-bg)}
+.am-sb-waiting{margin-top:10px;font-size:11.5px;font-weight:600;color:var(--gray)}
+/* Who has to act. Sits between the step name and the button because that is the order the
+   question gets asked: what is it, whose is it, what do I press. */
+.am-sb-owner{display:flex;align-items:center;gap:9px;margin-top:11px;padding:8px 10px;border:1px solid var(--border);border-radius:9px;background:#fff}
+.am-sb-owner.mine{border-color:var(--am-strong-line);background:var(--am-strong-bg)}
+.am-sb-owner-av{width:26px;height:26px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--navy);color:#fff;font-size:9.5px;font-weight:800;letter-spacing:.3px}
+.am-sb-owner-txt{display:flex;flex-direction:column;line-height:1.3;min-width:0}
+.am-sb-owner-txt b{font-size:12px;font-weight:700;color:var(--navy)}
+.am-sb-owner-txt i{font-size:10px;font-style:normal;color:var(--gray)}
+.am-sb-owner-flag{margin-left:auto;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--gray);white-space:nowrap}
+.am-sb-owner.mine .am-sb-owner-flag{color:var(--navy)}
+/* The stand-in action. Outlined rather than solid so it never competes with a real completion
+   the signed-in user owns — simulating is a demo affordance, not the primary path. */
+.am-sb-simulate{margin-top:11px;padding:7px 15px;border:1.5px dashed var(--am-strong-line);border-radius:8px;background:#fff;color:var(--navy);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;transition:.15s}
+.am-sb-simulate:hover{background:var(--am-tint-bg);border-style:solid}
+.am-sb-chase-link{display:block;margin-top:7px;padding:0;border:none;background:none;color:var(--gray);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;text-decoration:underline;text-underline-offset:2px}
+.am-sb-chase-link:hover{color:var(--navy)}
+/* The way into this deal's own run. Secondary to the action above it on purpose: completing the
+   step is what the panel is for, and stepping into the journey is the other thing you might want.
+   Full width so it reads as a second option rather than as a link tucked under one. */
+.am-sb-openrun{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;margin-top:8px;
+  padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);
+  color:var(--navy);font-size:12px;font-weight:600;font-family:inherit;cursor:pointer;transition:.15s}
+.am-sb-openrun:hover{border-color:var(--navy);background:var(--light)}
+.am-sb-openrun svg{flex-shrink:0;opacity:.75}
+/* The same button cut for a listing cell: auto width, tighter padding, no stacking margin. It
+   sits at the END of the row beside the drawer's hamburger, and must not wrap mid-label. */
+/* The row a run was just opened from. Quieter than a selection because nothing is open — it is a
+   "you were here" mark to save someone re-finding their row among nineteen, and it must not read
+   as a record being displayed somewhere. A left rule rather than a fill, so it survives the row's
+   own hover and zebra styling without fighting either. */
+.am-row.am-row-returned>td{background:#f8fafc}
+.am-row.am-row-returned>td:first-child{box-shadow:inset 3px 0 0 #94a3b8}
+.am-row-end{display:flex;align-items:center;justify-content:flex-end;gap:6px}
+.am-sb-openrun.row{width:auto;margin-top:0;padding:7px 10px;font-size:11.5px;white-space:nowrap;flex-shrink:0}
+/* == THE RUN MENU ==========================================================================
+   Fixed rather than absolute, and mounted on the body rather than in the cell. A listing row is
+   inside a table inside a scroller, and a menu positioned within that stack is clipped by
+   whichever ancestor happens to hide its overflow — which on this page is every one of them.
+   Position is written by amPaintRunMenu from the button's own rect, so the anchoring survives
+   a scrolled table, a narrow window and the taller follow-up panel replacing the shorter menu. */
+.am-runmenu{position:fixed;z-index:1200;display:none;width:308px;max-width:calc(100vw - 16px);
+  background:var(--card);border:1px solid var(--border);border-radius:12px;
+  box-shadow:0 14px 40px rgba(15,23,42,.16);overflow:hidden}
+.am-runmenu.open{display:block}
+.am-runmenu-head{padding:10px 14px;border-bottom:1px solid var(--border);background:var(--light);
+  display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}
+.am-runmenu-head b{font-size:11.5px;font-weight:700;color:var(--navy)}
+.am-runmenu-head span{font-size:11.5px;color:var(--gray);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.am-runmenu-head i{flex-basis:100%;font-style:normal;font-size:10.5px;color:var(--gray)}
+/* Each item is a title and a consequence. The second line is what stops the two reading as the
+   same kind of act — one names the step it opens, the other says outright that it moves nothing. */
+.am-runmenu-item{display:flex;align-items:flex-start;gap:10px;width:100%;padding:11px 14px;
+  border:none;border-bottom:1px solid #f1f5f9;background:none;text-align:left;cursor:pointer;
+  font-family:inherit;transition:.13s}
+.am-runmenu-item:last-child{border-bottom:none}
+.am-runmenu-item:hover{background:var(--light)}
+.am-runmenu-ico{flex-shrink:0;width:26px;height:26px;border-radius:8px;background:var(--ol);
+  display:flex;align-items:center;justify-content:center;color:var(--navy)}
+.am-runmenu-ico svg{width:14px;height:14px}
+.am-runmenu-txt{min-width:0;display:flex;flex-direction:column;gap:2px}
+.am-runmenu-txt b{font-size:12.5px;font-weight:700;color:var(--navy)}
+.am-runmenu-txt i{font-style:normal;font-size:11px;color:var(--gray);line-height:1.45}
+.am-runmenu-panel{padding:12px 14px 13px}
+.am-runmenu-panel-title{font-size:12.5px;font-weight:700;color:var(--navy)}
+.am-runmenu-panel-sub{font-size:11px;color:var(--gray);line-height:1.5;margin:3px 0 9px}
+.am-runmenu-input{width:100%;box-sizing:border-box;resize:vertical;padding:8px 10px;
+  border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;
+  color:var(--navy);background:#fff;line-height:1.5}
+.am-runmenu-input:focus{outline:none;border-color:var(--navy)}
+.am-runmenu-err{font-size:10.5px;color:#b91c1c;line-height:1.45;margin-top:5px;min-height:0}
+.am-runmenu-btns{display:flex;align-items:center;gap:7px;margin-top:9px}
+.am-runmenu-send{flex:1;padding:8px 12px;border:none;border-radius:8px;background:var(--navy);
+  color:#fff;font-size:12px;font-weight:700;font-family:inherit;cursor:pointer;transition:.15s}
+.am-runmenu-send:hover{filter:brightness(1.12)}
+.am-runmenu-ghost{padding:8px 12px;border:1px solid var(--border);border-radius:8px;
+  background:var(--card);color:var(--gray);font-size:12px;font-weight:600;font-family:inherit;cursor:pointer;transition:.15s}
+.am-runmenu-ghost:hover{border-color:var(--navy);color:var(--navy)}
+.am-runmenu-foot{margin-top:9px;font-size:10.5px;color:var(--gray)}
+/* What was actually said, in the record's own trail. Quoted and indented so a chase reads as a
+   message that was sent rather than as the system describing itself. */
+.am-log-quote{margin-top:5px;padding-left:9px;border-left:2px solid var(--border);
+  font-size:11.5px;color:var(--navy);line-height:1.5}
+/* A finished placement's one settled fact — tick and sentence in the completed green, replacing
+   the step counter and auto tag that dressed a done record as mid-flight machinery. */
+.am-where-done{display:inline-flex;align-items:center;gap:6px;color:#15803d;font-weight:600}
+.am-where-done svg{flex-shrink:0}
+/* The rest of the stage, read-only. */
+.am-sb-steps{border:1px solid var(--border);border-radius:11px;padding:11px 13px;margin-bottom:18px;background:#fff}
+.am-sb-steps-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-size:10px;font-weight:800;color:var(--navy);text-transform:uppercase;letter-spacing:.4px;margin-bottom:9px}
+.am-sb-steps-head span{font-size:10px;font-weight:700;color:var(--gray);text-transform:none;letter-spacing:0}
+/* The `.am-sb-step` row rules that used to live here went with the "Manual steps in <stage>"
+   checklist they styled. The container above them stays: the Workflow tab's "Automated by the
+   system" panel is the other thing built out of it, and it draws its own row (.am-auto-row). */
+/* Tone set by a class from the renderer rather than :has(), so the card is styled by the same
+   `kind` the button is built from and there is one source of truth for which case this is. */
+.am-sb-next.wait{border-color:var(--border);background:#fff}
+.am-sb-next.wait .am-sb-next-kicker{color:var(--gray)}
+.am-sb-next.chase{border-color:var(--am-tint-line);background:var(--am-tint-bg)}
+.am-sb-next.chase .am-sb-next-kicker{color:var(--am-tint-ink)}
+/* Auto: ink header treatment without the "do" urgency — the card informs, it does not ask. */
+.am-sb-next.auto{border-color:#cbd5e1;background:#f8fafc}
+.am-sb-next.auto .am-sb-next-kicker{color:var(--navy);display:inline-flex;align-items:center;gap:5px}
+.am-sb-owner.auto .am-sb-owner-av{background:var(--navy);color:#fff}
+.am-sb-owner.auto .am-sb-owner-flag{color:var(--gray)}
+.am-sb-loghead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-size:11px;font-weight:800;color:var(--navy);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px}
+.am-sb-loghead span{font-size:10.5px;font-weight:600;color:var(--gray);text-transform:none;letter-spacing:0}
+
+/* ----- small shared bits -------------------------------------------------------
+   `.am-row` is deliberately absent: it is a querySelectorAll hook for the drawer's
+   row-highlighting, not a style. Everything else here is rendered by the drawer. */
+.am-head-left{min-width:0}
+/* An optional or conditional task ("non-owned countries", "if off-standard") */
+.am-sub-cond{font-size:10px;font-style:italic;color:#9ca3af;font-weight:500}
+/* Inline tags in the Logs trail and the Workflow list */
+.am-sub-tag{font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;padding:1px 6px;border-radius:20px;white-space:nowrap;line-height:1.5;background:var(--am-tint-bg);color:var(--am-tint-ink);border:1px solid var(--am-tint-line)}
+.am-sub-tag.breach{background:var(--am-strong-bg);color:var(--navy);border-color:var(--am-strong-line)}
+/* Automated step marker — solid ink, the same fill-weight code as the journey chips: solid
+   means the machine acts. The bolt is the icon, "auto" the word, both tiny by design. */
+.am-sub-tag.auto{display:inline-flex;align-items:center;gap:3px;background:var(--navy);color:#fff;border-color:var(--navy);margin-left:6px}
+.am-sub-tag.auto svg{width:8px;height:8px}
+.am-act.auto{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;color:var(--navy);background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:5px 11px}
+/* Workflow tab: automation that has already run. The CSM row carries a live select — the one
+   automated fact that is meant to be revisited — everything else is a plain "Done". */
+.am-auto-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #f1f3f5}
+.am-auto-row:last-child{border-bottom:none}
+.am-auto-bolt{width:22px;height:22px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--navy);color:#fff}
+.am-auto-bolt svg{width:9px;height:9px}
+.am-auto-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.am-auto-txt b{font-size:12px;font-weight:700;color:var(--navy)}
+.am-auto-txt i{font-size:10.5px;font-style:normal;color:var(--gray)}
+.am-auto-done{font-size:10.5px;font-weight:700;color:var(--gray);text-transform:uppercase;letter-spacing:.4px}
+.am-auto-select{height:28px;padding:0 8px;border:1px solid var(--border);border-radius:7px;font-size:11.5px;font-weight:600;color:var(--navy);font-family:inherit;background:#fff;cursor:pointer;outline:none;max-width:150px}
+.am-auto-select:hover{border-color:#94a3b8}
+/* "Your turn" / "Gate" markers in the client-facing tab */
+.am-stage-flag{font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;padding:2px 7px;border-radius:20px;white-space:nowrap;line-height:1.5;background:var(--am-tint-bg);color:var(--am-tint-ink);border:1px solid var(--am-tint-line)}
+.am-stage-flag.gate{background:var(--am-strong-bg);color:var(--navy);border-color:var(--am-strong-line)}
+
+/* ===== OPS MANAGER — BHAIYAA STORE OPERATIONS ================================
+   The store board is the same instrument as the deal board above and reuses every
+   rule in this file. It needs exactly one thing the deal board never had: a way to
+   say a run has STOPPED, which is not the same as a run that is late.
+
+   It stays inside the page's monochrome law — the strong end of the ink scale, a
+   heavier left rule, and the word "stopped" doing the work. A red callout here
+   would have been the fifth colour this stylesheet removed on purpose, and the
+   thing it competes with is the one it must not: the age column that says late. */
+.so-halt{margin:-2px 0 15px;padding:10px 13px;border:1px solid var(--am-strong-line);border-left:3px solid var(--navy);border-radius:8px;background:var(--am-quiet-bg);font-size:11.5px;line-height:1.6;color:var(--gray)}
+.so-halt b{color:var(--navy);font-weight:800}
+
+/* The KYC preview in the Logs action panel: a few lines of what Bhaiyaa returned,
+   shown before the button that leaves for the journey. It sits inside the panel's
+   own card, so it is inset rather than bordered all round — another box inside a
+   box reads as two panels when it is one thought. */
+.so-kycp{margin:2px 0 12px;padding:10px 12px;border-radius:9px;background:#f8fafc;
+  border-left:2.5px solid #cbd5e1}
+.so-kycp-head{display:flex;align-items:center;gap:5px;font-size:9.5px;font-weight:800;
+  letter-spacing:.4px;text-transform:uppercase;color:var(--gray);margin-bottom:8px}
+.so-kycp-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:2.5px 0}
+.so-kycp-k{font-size:11px;color:var(--gray);flex-shrink:0}
+.so-kycp-v{font-size:11.5px;font-weight:600;color:var(--navy);text-align:right;overflow-wrap:anywhere}
