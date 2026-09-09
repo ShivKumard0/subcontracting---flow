@@ -1421,6 +1421,18 @@ function scValidate(txn,step){
       // FR1.6 — "Adjustment Order Reference | Mandatory when WIP Adjustment Required = Yes".
       if(it.wipAdjust==='Yes'&&!String(it.adjustmentOrder||'').trim())
         scFormErrors.issueItems='Issue item '+n+' is WIP and needs an Adjustment Order Reference';
+      /* Caught HERE because here is where it can still be fixed. FR6.3 blocks the shipment when
+         no bin holds the required quantity, and FR6.3's simplified flow forbids partial
+         shipments — so an SCR for more than exists anywhere can never ship, and step 6 has no
+         return action. Left to be discovered at step 6 it becomes unrecoverable; asked for at
+         step 1 it is one number to change. */
+      if(it.item&&Number(it.qty)>0){
+        const total=scMaster.stock.filter(function(st){return st.item===it.item;})
+          .reduce(function(a,st){return a+Number(st.free||0);},0);
+        if(total>0&&Number(it.qty)>total)
+          scFormErrors.issueItems='Issue item '+n+' asks for '+it.qty+' of '+it.item
+            +' but only '+total+' exists across all storage locations. The shipment could never be sourced.';
+      }
     });
     // FR1.8 — Remarks become mandatory when the non-billable reason is Other.
     if(f.billable==='No'&&f.nonBillReason&&scRemarksRequired('RC-NONBILL',f.nonBillReason)&&!String(f.remarks||'').trim())
@@ -1437,16 +1449,22 @@ function scValidate(txn,step){
        and FR13.3 validates that the "Vendor matches the applicable PO". Nothing tied the Vendor
        persona to a vendor code, so an SCR naming any vendor landed in the same queue and could be
        actioned by whoever held it. */
+    /* Refuse only when SOMEONE ELSE can actually take it. A vendor code with no matching login —
+       a vendor retired from the master, or data from an older build — resolved to the default
+       vendor persona, who was then refused for not being that vendor. Nobody could raise the
+       ASN and step 13 has no return, so the transaction was stranded. A rule that blocks the
+       only available actor is not access control, it is a trap. */
     const me=scActor(activePersonaId);
-    if(me&&me.vendorCode&&txn.scr.vendor&&txn.scr.vendor!==me.vendorCode){
+    const ownerId=scVendorPersona(txn.scr.vendor);
+    if(me&&me.vendorCode&&txn.scr.vendor&&txn.scr.vendor!==me.vendorCode&&ownerId!==me.id){
       // Say who CAN act, not just who cannot — routing now hands step 13 to the matching vendor
       // login, so reaching this means the persona was switched by hand.
-      const owner=scActor(scVendorPersona(txn.scr.vendor));
+      const owner=scActor(ownerId);
       // Its own key: sharing __asn with the inspection-document check meant whichever ran last
       // won, and the vendor message was silently overwritten.
       scFormErrors.__vendor='This transaction is for '+((scVendor(txn.scr.vendor)||{}).name||txn.scr.vendor)
         +'. You can only raise an ASN against your own purchase orders'
-        +(owner&&owner.id!==me.id?' — switch to the '+owner.name+' login to continue.':'.');
+        +(owner?' — switch to the '+owner.name+' login to continue.':'.');
     }
     // FR13.3 — submission is blocked until the mandatory inspection documents are attached.
     if(!((txn.asn.docs||[]).length))scFormErrors.__asn='At least one inspection document must be attached before the ASN can be raised.';
@@ -2475,6 +2493,11 @@ function scShipLine(txn,i){
   return {item:src.item,qty:Number(src.qty||0),ratio:src.ratio,
     warehouse:ov.warehouse||src.warehouse||'',
     location:ov.location||src.location||'',
+    wipAdjust:src.wipAdjust||'No',
+    // FR7.3 blocks shipment submission when a WIP adjustment reference is missing, which means
+    // the FRD expects it to be capturable AT the shipment — it is not always known when the SCR
+    // is raised. The shipment's value wins; the approved SCR keeps whatever it was approved with.
+    adjustmentOrder:ov.adjustmentOrder||src.adjustmentOrder||'',
     moved:!!(ov.warehouse||ov.location)};
 }
 function scShipLines(txn){return (txn.scr.issueItems||[]).map(function(_,i){return scShipLine(txn,i);});}
@@ -2608,9 +2631,21 @@ function scPanel6(txn){
           }).join(''))
         +'</select>'
       : scEsc(r.location);
+    /* FR6.2 / FR7.3 — the WIP adjustment reference. It is only enterable on the SCR screen, and
+       step 6 has no return action, so a shipment that reached here without one could neither be
+       submitted nor corrected. Capturable in place, which is what FR7.3's "submission blocked"
+       row presumes. */
+    const wipCell=r.wipAdjust==='Yes'
+      ? (edit
+          ? '<input class="ep-form-input'+(String(r.adjustmentOrder||'').trim()?'':' sc-err')+'" style="width:150px" '
+            +'placeholder="Adjustment order ref." value="'+scEsc(r.adjustmentOrder||'')+'" '
+            +'onchange="scSetShipLine('+i+',\'adjustmentOrder\',this.value)">'
+          : scEsc(r.adjustmentOrder||'—'))
+      : '<span class="sc-dim">Not required</span>';
     return '<tr><td>'+(i+1)+'</td><td><b>'+scEsc(r.item)+'</b><div class="sc-sub">'+scEsc(it?it.name:'')+'</div></td>'
       +'<td>'+need+'</td><td>'+scEsc(it?it.uom:'')+'</td><td>'+whCell+'</td><td>'+locCell+'</td>'
-      +'<td>'+have+'</td><td>'+scChip(ok?'Available':(have===0?'No stock':'Short by '+(need-have)),ok?'green':'red')+'</td></tr>';
+      +'<td>'+have+'</td><td>'+scChip(ok?'Available':(have===0?'No stock':'Short by '+(need-have)),ok?'green':'red')+'</td>'
+      +'<td>'+wipCell+'</td></tr>';
   }).join('');
   const blocked=scShipmentBlocked(txn);
   /* When a bin is empty, say WHERE the material actually is. A red "no stock" banner with no
@@ -2637,7 +2672,7 @@ function scPanel6(txn){
         +'The SCR needs correcting — ask the Buyer to raise a Return SCR from the PO step.</div>';
   }
   return '<div class="sc-sec"><div class="sc-sec-h">Issue Items &amp; Availability</div>'
-    +scPanelTable(['#','Issue Item','Shipment Qty','UOM','Warehouse','Storage Loc.','Available','Check'],rows,820)
+    +scPanelTable(['#','Issue Item','Shipment Qty','UOM','Warehouse','Storage Loc.','Available','Check','WIP Adj. Ref.'],rows,960)
     +(blocked?'<div class="sc-warn red"><b>Shipment cannot be submitted.</b><br>'+scEsc(blocked)+'</div>'
       :'<div class="sc-warn green"><b>Material is available.</b><br>Submitting reserves these quantities against this shipment and moves them to the Reserved location. No physical movement happens at this stage.</div>')
     +hint
@@ -2649,7 +2684,8 @@ function scPanel6(txn){
    check behind it: "WIP Adjustment required but Adjustment Order Reference missing → Submission
    blocked". The flag is derived on the issue line in scSetIssue. */
 function scWipBlocked(txn){
-  const bad=(txn.scr.issueItems||[]).filter(function(r){
+  // Reads the shipment line, so a reference entered on the shipment clears the block.
+  const bad=scShipLines(txn).filter(function(r){
     return r.wipAdjust==='Yes'&&!String(r.adjustmentOrder||'').trim();});
   return bad.length?('WIP adjustment is required for '+bad.map(function(r){return r.item;}).join(', ')
     +' — an Adjustment Order Reference is mandatory before the shipment can be submitted.'):'';
