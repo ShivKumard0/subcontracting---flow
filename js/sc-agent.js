@@ -55,6 +55,11 @@ function scAgentCtxLabel(){
    would let the copilot's numbers drift from the screen's. But scComputeRecon WRITES its results
    onto txn.recon, so calling it from the copilot mutated the live record. Cloning first keeps one
    implementation of the maths and still leaves the transaction untouched. */
+// Rejected is terminal but it is NOT "closed" in the FR18 sense: nothing was issued, received or
+// reconciled. Several answers read very differently for the two, so they are told apart here.
+function scAgentRejected(t){
+  return !!t&&(t.status==='Rejected'||scDocStatus(t,'scr')==='Rejected');
+}
 function scAgentClone(t){try{return JSON.parse(JSON.stringify(t));}catch(e){return t;}}
 function scAgentRecon(t){try{return scComputeRecon(scAgentClone(t));}catch(e){return {};}}
 function scAgentGate(t){try{return scGateBlock(scAgentClone(t));}catch(e){return '';}}
@@ -177,6 +182,10 @@ function scAgentFollowups(q,sub){
     return picks.concat(['What is overdue?','Show me closed transactions','What is with Finance?']).slice(0,5);
   }
   const no=t.no||'this one',out=[];
+  // A rejected record has no material, no documents beyond the SCR and no reconciliation, so the
+  // usual suggestions would all lead to dead ends. Only its history is worth offering.
+  if(scAgentRejected(t))
+    return ['Who has acted on '+no+'?','Show me closed transactions','What is overdue?'];
   if(scAgentState.agent==='recon'){
     if(!t.closed)out.push('Why can I not close '+no+'?');
     out.push('How is consumption calculated for '+no+'?','What is outstanding on '+no+'?');
@@ -400,6 +409,17 @@ function scAgentAnswerRecon(q){
           +(clear?'  ·  reconciles':'  ·  not yet reconciled');}).join('\n')
       +'\n\nName one and I will explain its arithmetic and what is blocking closure.';
   }
+  /* A REJECTED transaction has no reconciliation, and saying otherwise invents one. FR2.9 stops
+     a rejected SCR dead: "block Product / WIP / BOM processing; block Order / PO creation; block
+     Shipment and material movement." Nothing was ever issued, so there is nothing to reconcile —
+     but the terminal check below keyed on `closed`, and a rejection is closed, so it sailed past
+     the not-started guard and reported an issue quantity that had never left the building. */
+  if(scAgentRejected(t))
+    return '**'+(t.no||'This transaction')+'** was **rejected** at approval'
+      +(t.step?' (step '+t.step+' — '+scStep(t.step).short+')':'')+', so it has no reconciliation.\n\n'
+      +'FR2.9 stops a rejected SCR before anything moves: no PO is created, no shipment is raised '
+      +'and no material is ever issued. The record is retained for audit only.\n\n'
+      +'Ask me *who has acted on '+(t.no||'it')+'* for the rejection reason and who recorded it.';
   if(t.step<16&&!t.closed)
     return 'Reconciliation has not started on **'+(t.no||'this transaction')+'** yet — it opens once Stores confirms the material receipt at step 16. This is at step '+t.step+' ('+scStep(t.step).short+').\n\nWhat I can tell you now: **'+(t.scr.recvQty||0)+'** units are expected back, against **'
       +(t.scr.issueItems||[]).reduce(function(a,r){return a+Number(r.qty||0);},0)+'** issued to the vendor.';
@@ -418,7 +438,9 @@ function scAgentAnswerRecon(q){
       +r.issued+' - '+r.consumed+' - '+r.returned+' - '+r.scrap+' = **'+r.outstanding+'**';
   }
   if(scAgentMatch(q,['close','closure','blocked','cannot','can not','why','stop','prevent'])){
-    if(t.closed)return '**'+(t.no||'This transaction')+'** is already closed. At closure the SCR, PO, Shipment and Challan all moved to Closed; the Delivery Note stayed Approved, the ASN QC Cleared and the IMR Confirmed — FR18.3 deliberately leaves those three alone.';
+    if(t.closed)return '**'+(t.no||'This transaction')+'** is already closed'
+      +(t.closedBy?' — '+scActorLabel(t.closedBy)+' closed it on '+t.closedAt:'')+'. '
+      +'At closure the SCR, PO, Shipment and Challan all moved to Closed; the Delivery Note stayed Approved, the ASN QC Cleared and the IMR Confirmed — FR18.3 deliberately leaves those three alone.';
     if(!gate)return 'Nothing is blocking closure. Pending receivable is nil and all issue material is accounted for, so **Confirm Full Receipt** is available to '+scActorLabel(t.pendingWith)+'.';
     let a='**Closure is blocked.** '+gate+'\n\nFR17.7 requires all of these before full receipt can be confirmed:\n\n'
       +'· Pending receivable = 0 — currently **'+r.pending+'**'+(r.pending?'  NOT MET':'  met')+'\n'

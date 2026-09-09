@@ -1332,7 +1332,13 @@ function scSeed(){
         if(s===12)t.position='At Vendor';
         if(s===13&&!t.asn.no){t.asn.no=scNextNo('asn');t.asn.qtyReady=t.scr.recvQty;
           t.asn.docs=[{name:'Inspection_Certificate.pdf',at:scNow(),by:'Vendor'}];}
-        if(s===16&&!t.imr.no){t.imr.no=scNextNo('imr');t.imr.receivedQty=t.scr.recvQty;
+        /* Guarded on the RECEIPT, not on the IMR number. The number is minted one step earlier
+           (nxt===16, mirroring scAdvance), so `!t.imr.no` was already false by the time this ran
+           and the receipt never happened — a seeded transaction could reach Closed while its
+           reconciliation still read "Received 0, Pending 500". */
+        if(s===16&&!t.imr.receivedQty){
+          if(!t.imr.no)t.imr.no=scNextNo('imr');
+          t.imr.receivedQty=t.scr.recvQty;
           t.imr.receivingLocation='FG-WH/FG-01';t.imr.receivedBy='stores';t.imr.receiptAt=scNow();
           // Mirror what a real confirmation does, so a seeded reconciliation has stock behind it.
           scReceiveMaterial(t,Number(t.scr.recvQty||0));}
