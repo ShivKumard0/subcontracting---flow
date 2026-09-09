@@ -258,6 +258,30 @@ function scAgentRange(){
   const nums=all.map(function(t){return t.no;}).sort();
   return {all:all,first:nums[0],last:nums[nums.length-1],count:nums.length};
 }
+/* == THE BRIEFING ==========================================================================
+   Most people never type anything into an assistant. The highest-value moment is arrival, so the
+   panel opens with what is true right now for whoever is signed in — same data, no question
+   needed — rather than an empty box and a list of things you could ask. == */
+function scAgentBriefing(){
+  const me=typeof activePersonaId!=='undefined'?activePersonaId:'';
+  const actor=scActor(me);
+  const mine=typeof scActionable==='function'?scActionable(me).filter(scAgentCanSee):[];
+  const all=scAgentVisibleTxns().filter(function(t){return !t.closed;});
+  const overdue=all.filter(scOverdue);
+  const blocked=mine.filter(function(t){return !!scAgentGate(t);});
+  const oldest=mine.slice().sort(function(a,b){return scAgentHours(b.pendingSince)-scAgentHours(a.pendingSince);})[0];
+  let s='Good to see you'+(actor?', **'+actor.name+'**':'')+'.\n\n';
+  if(!mine.length)s+='· Nothing is waiting on you right now\n';
+  else{
+    s+='· **'+mine.length+'** waiting on you'+(actor?' as '+actor.label:'')+'\n';
+    if(oldest)s+='· Longest: **'+(oldest.no||'a draft')+'** at step '+oldest.step+' '+scStep(oldest.step).short
+      +', '+scSince(oldest.pendingSince)+'\n';
+  }
+  if(blocked.length)s+='· **'+blocked.length+'** of yours cannot move until something is fixed\n';
+  if(overdue.length)s+='· **'+overdue.length+'** on the board past the expected return date\n';
+  s+='· '+all.length+' open across the journey\n';
+  return s;
+}
 function scAgentRangePrompt(){
   const r=scAgentRange();
   if(!r.count)return 'There are no transactions on the board yet.';
@@ -314,6 +338,34 @@ function scAgentFollowups(q,sub){
   return out.slice(0,4);
 }
 
+/* == ACTING ON AN ANSWER ====================================================================
+   An answer that ends in "waiting on Security User" and nothing else leaves the reader to close
+   the panel, find the row and open it by hand — the insight is free and acting on it costs what
+   it always did. These two turn a reply into a destination.
+
+   NAVIGATION IS NOT MUTATION. The guarantee that matters is that the copilot never changes
+   workflow state, and opening a record or switching which persona is signed in changes neither:
+   no step moves, no status is stamped, no document is minted. Both reuse the app's own controls
+   (scOpen, scContinueAs) rather than reimplementing them. == */
+function scAgentOpenTxn(id){
+  scAgentToggle();                                  // close the panel first, or it covers the record
+  if(typeof scOpen==='function')scOpen(id);
+}
+function scAgentContinueAs(id){
+  scAgentToggle();
+  if(typeof scOpenTxnId!=='undefined')scOpenTxnId=id;
+  if(typeof scContinueAs==='function')scContinueAs();
+}
+// The buttons that belong under an answer about one transaction.
+function scAgentActions(t){
+  if(!t||!t.id)return [];
+  const out=[{t:'Open '+(t.no||'transaction'),fn:'scAgentOpenTxn'}];
+  const me=typeof activePersonaId!=='undefined'?activePersonaId:'';
+  if(!t.closed&&t.pendingWith&&t.pendingWith!==me&&scActor(t.pendingWith))
+    out.push({t:'Continue as '+scActorLabel(t.pendingWith),fn:'scAgentContinueAs'});
+  return out;
+}
+
 /* == THE PORTFOLIO VIEW — the dashboard, answered in prose ================================== */
 function scAgentVisibleTxns(){
   return scState.txns.filter(function(t){return scAgentCanSee(t);});
@@ -324,12 +376,114 @@ function scAgentLine(t){
     +(t.closed?'':', waiting '+scSince(t.pendingSince))
     +(scOverdue(t)?'  ·  OVERDUE':'');
 }
+/* == THE QUESTIONS A MANAGER ASKS ===========================================================
+   The copilot could count but not add up or compare, so "how much is stuck?" and "where is the
+   bottleneck?" — the two questions no screen in the app answers — had no answer here either.
+   Both are computable from data already on the record. == */
+function scAgentHours(iso){
+  const t=iso?new Date(iso).getTime():0;
+  return t?Math.max(0,Math.round((Date.now()-t)/3600000)):0;
+}
+function scAgentMoney(t){
+  if(!t.scr||t.scr.billable==='No')return 0;
+  return Number(t.po&&t.po.price||0)*Number(t.scr.recvQty||0);
+}
+function scAgentValueAnswer(q){
+  const open=scAgentVisibleTxns().filter(function(t){return !t.closed;});
+  const withValue=open.filter(function(t){return scAgentMoney(t)>0;});
+  const total=withValue.reduce(function(a,t){return a+scAgentMoney(t);},0);
+  if(!total)return 'No open transaction carries a priced PO yet, so there is no value to total.';
+  const atVendor=open.filter(function(t){return t.position==='At Vendor';});
+  const overdue=open.filter(scOverdue);
+  const byStep={};
+  withValue.forEach(function(t){byStep[t.step]=(byStep[t.step]||0)+scAgentMoney(t);});
+  const worst=Object.keys(byStep).sort(function(a,b){return byStep[b]-byStep[a];}).slice(0,4);
+  return '**'+scMoney(total)+'** of PO value is open across '+withValue.length+' transaction'+(withValue.length===1?'':'s')+'.\n\n'
+    +'· Out at the vendor — **'+scMoney(atVendor.reduce(function(a,t){return a+scAgentMoney(t);},0))+'** across '+atVendor.length+'\n'
+    +'· Past its expected return — **'+scMoney(overdue.reduce(function(a,t){return a+scAgentMoney(t);},0))+'** across '+overdue.length+'\n\n'
+    +'**Where it is sitting**\n'
+    +worst.map(function(k){return '· Step '+k+' — '+scStep(Number(k)).short+': **'+scMoney(byStep[k])+'**';}).join('\n')
+    +'\n\nNon-billable transactions carry no value and are excluded.';
+}
+function scAgentBottleneck(q){
+  const open=scAgentVisibleTxns().filter(function(t){return !t.closed;});
+  if(!open.length)return 'Nothing is open, so there is no queue to analyse.';
+  const byStep={};
+  open.forEach(function(t){
+    const h=scAgentHours(t.pendingSince);
+    (byStep[t.step]=byStep[t.step]||{n:0,h:0,worst:null,worstH:-1}).n++;
+    byStep[t.step].h+=h;
+    if(h>byStep[t.step].worstH){byStep[t.step].worstH=h;byStep[t.step].worst=t;}
+  });
+  const rows=Object.keys(byStep).map(function(k){
+    const b=byStep[k];return {step:Number(k),n:b.n,avg:Math.round(b.h/b.n),worst:b.worst,worstH:b.worstH};
+  }).sort(function(a,b){return b.avg-a.avg;});
+  const oldest=open.slice().sort(function(a,b){return scAgentHours(b.pendingSince)-scAgentHours(a.pendingSince);})[0];
+  return 'Where time is going, by how long work has been sitting at each step:\n\n'
+    +rows.slice(0,5).map(function(r){
+      return '· **Step '+r.step+' — '+scStep(r.step).short+'** — '+r.n+' waiting, '
+        +r.avg+' hr on average, with '+scActorLabel(scStep(r.step).actors[0]||'');}).join('\n')
+    +'\n\nLongest single wait: **'+(oldest.no||'a draft')+'** at step '+oldest.step+' ('+scStep(oldest.step).short
+    +'), '+scSince(oldest.pendingSince)+' with '+scActorLabel(oldest.pendingWith)+'.'
+    +'\n\nMeasured from when each transaction arrived at its current step, not from creation.';
+}
+function scAgentVendorAnswer(q){
+  const all=scAgentVisibleTxns().filter(function(t){return t.scr&&t.scr.vendor;});
+  if(!all.length)return 'No transaction on the board names an external vendor.';
+  const by={};
+  all.forEach(function(t){
+    const v=t.scr.vendor;
+    (by[v]=by[v]||{n:0,open:0,overdue:0,value:0}).n++;
+    if(!t.closed){by[v].open++;by[v].value+=scAgentMoney(t);if(scOverdue(t))by[v].overdue++;}
+  });
+  return 'By vendor:\n\n'+Object.keys(by).map(function(v){
+    const b=by[v];
+    return '· **'+((scVendor(v)||{}).name||v)+'** — '+b.n+' transaction'+(b.n===1?'':'s')+', '
+      +b.open+' open'+(b.overdue?', **'+b.overdue+' overdue**':'')
+      +(b.value?', '+scMoney(b.value)+' in flight':'');
+  }).join('\n');
+}
+/* FORWARD-LOOKING. The gates are known, so they can be run against a record before it reaches
+   them — telling a Planner at step 1 that the shipment will block is worth more than explaining
+   the block at step 6, when the SCR is approved and no longer theirs to change. */
+function scAgentForecast(t){
+  const risks=[];
+  (t.scr.issueItems||[]).forEach(function(r){
+    if(!r.item||!(Number(r.qty)>0))return;
+    const total=scMaster.stock.filter(function(s){return s.item===r.item;})
+      .reduce(function(a,s){return a+Number(s.free||0);},0);
+    const here=typeof scAvail==='function'?scAvail(r.item,r.warehouse,r.location,t.id):0;
+    if(t.step<7&&here<Number(r.qty)){
+      risks.push(total>=Number(r.qty)
+        ? '**Step 6 — shipment** will block: '+r.item+' has only '+here+' free at '+r.warehouse+' / '+r.location
+          +', but '+total+' exists elsewhere. Change the source location on the shipment.'
+        : '**Step 6 — shipment** will block: only '+total+' of '+r.item+' exists anywhere and '+r.qty+' is needed.');
+    }
+    if(r.wipAdjust==='Yes'&&!String(r.adjustmentOrder||'').trim())
+      risks.push('**Step 6 — shipment** will block: '+r.item+' needs a WIP Adjustment Order Reference (FR7.3).');
+  });
+  if(t.step<13&&typeof scInspectionRequired==='function'&&scInspectionRequired(t)&&!((t.asn.docs||[]).length))
+    risks.push('**Step 13 — ASN** will block: '+(t.scr.recvItem||'this item')+' requires inspection documents (FR13.3).');
+  if(t.step<7&&t.scr.billable!=='No'&&!(Number(t.po&&t.po.price)>0))
+    risks.push('**Step 4 — PO** needs a price: the PO is billable and no rate has been set yet.');
+  if(!t.closed&&t.shipment&&t.shipment.expectedReturn&&scOverdue(t))
+    risks.push('**Already overdue** against the expected return date of '+t.shipment.expectedReturn+'.');
+  return risks;
+}
 function scAgentPortfolio(q){
   const all=scAgentVisibleTxns();
   const open=all.filter(function(t){return !t.closed;});
   const closed=all.filter(function(t){return t.closed;});
   if(!all.length)return 'There are no transactions I can see yet.';
 
+  // The manager questions, ahead of the listings — they are about the set as a whole.
+  if(scAgentMatch(q,['value','worth','exposure','money','amount','cost','total'])&&!scAgentMatch(q,['this']))
+    return scAgentValueAnswer(q);
+  if(scAgentMatch(q,['bottleneck','slowest','longest','delay','ageing','aging','cycle time','taking'])
+    ||scAgentMatch(q,['where'])&&scAgentMatch(q,['time','stuck']))
+    return scAgentBottleneck(q);
+  if(scAgentMatch(q,['vendor','supplier','subcontractor'])&&!scAgentMatch(q,['this']))
+    return scAgentVendorAnswer(q);
   if(scAgentMatch(q,['overdue','late','breach','sla'])){
     const od=open.filter(scOverdue);
     return od.length
@@ -399,6 +553,23 @@ function scAgentAnswerAskDeal(q){
   if(sub.byRef&&!sub.txn)return 'I cannot find **'+sub.token+'**. I match on any reference a transaction carries — '
     +'SCR, PO, shipment, outbound key, delivery note, challan, gate pass, ASN, IMR or BOM. Check the number and ask again.';
 
+  /* "What should I do?" is a different question from "what is on the board" — it is about this
+     person's queue, in the order they should work it. The app knows which steps each role owns. */
+  if(scAgentMatch(q,['what should i do','my queue','my work','my tasks','where do i start','next for me','anything for me'])
+    ||(scAgentMatch(q,['i'])&&scAgentMatch(q,['do','start','work']))){
+    const me=typeof activePersonaId!=='undefined'?activePersonaId:'';
+    const actor=scActor(me);
+    const mine=(typeof scActionable==='function'?scActionable(me):[]).filter(scAgentCanSee)
+      .sort(function(a,b){return scAgentHours(b.pendingSince)-scAgentHours(a.pendingSince);});
+    if(!mine.length)return 'Nothing is waiting on you'+(actor?' as '+actor.label:'')+' right now.\n\n'
+      +'Ask me *what is overdue* or *where is the bottleneck* if you want to see where the pressure is elsewhere.';
+    return 'You have **'+mine.length+'** waiting'+(actor?' as '+actor.label:'')+', oldest first:\n\n'
+      +mine.slice(0,6).map(function(x){
+        const g=scAgentGate(x);
+        return '· **'+(x.no||'Draft')+'** — step '+x.step+' '+scStep(x.step).short+', '+scSince(x.pendingSince)
+          +(g?'\n   blocked: '+g:'');}).join('\n')
+      +'\n\n'+(actor&&actor.focus?actor.focus:'');
+  }
   // Nothing named, nothing open, and the question is about "an SCR" — ask which one.
   if(!sub.byRef&&!sub.txn&&scAgentIsAmbiguous(q))return scAgentRangePrompt();
   /* A reference always wins. Otherwise a portfolio-shaped question is about the board — unless
@@ -408,6 +579,17 @@ function scAgentAnswerAskDeal(q){
   const t=sub.txn;
   if(!t)return scAgentPortfolio(q);
   const s=t.scr,v=typeof scVendor==='function'?scVendor(s.vendor):null;
+
+  // ---- what could go wrong from here (forward-looking, not a description of now)
+  if(scAgentMatch(q,['risk','will','forecast','ahead','anticipate','go wrong','fail','upcoming problem'])){
+    const risks=scAgentForecast(t);
+    return risks.length
+      ? 'Looking ahead on **'+(t.no||'this transaction')+'**, '+risks.length+' thing'+(risks.length===1?'':'s')+' will get in the way:\n\n'
+        +risks.map(function(r){return '· '+r;}).join('\n')
+        +'\n\nEach of these is a gate the FRD defines — they will stop the transaction when it reaches them.'
+      : 'Nothing foreseeable is in the way of **'+(t.no||'this transaction')+'**. Stock is available for every issue line, '
+        +'the commercial terms are set, and no document requirement is outstanding.';
+  }
   // Answering about something the user is not looking at: say which record, so the reply is never
   // mistaken for the page in front of them.
   const lead=sub.byRef?'':'';
@@ -512,6 +694,26 @@ function scAgentAnswerAskDeal(q){
       +'\n· PO value — **'+(qty&&price?scMoney(qty*price):'not calculable yet')+'**';
     if(t.po.rateContract)a+='\n\nPriced off rate contract **'+t.po.rateContract+'**, so the rate is locked and the Buyer cannot overwrite it.';
     return a;
+  }
+  /* SAY SO WHEN IT DOES NOT KNOW. Every unmatched question used to fall through to the summary
+     below, so asking something off-topic returned a confident transaction card — the behaviour
+     that quietly teaches people not to trust the answers it IS good at. If the question shares no
+     vocabulary with this domain at all, it says so instead of guessing. */
+  /* Domain NOUNS only. The first version of this list included "what is", "show" and "where",
+     which nearly every question contains — so the guard passed everything and never fired. The
+     test has to be "does this question share vocabulary with sub-contracting", not "is this a
+     question". */
+  if(!scAgentMatch(q,['scr','po','transaction','shipment','challan','delivery','note','asn','imr','bom',
+      'vendor','supplier','material','stock','item','quantity','qty','step','status','document','paperwork',
+      'reconciliation','recon','block','blocked','blocking','overdue','value','price','rate','cost',
+      'approve','approval','reject','return','closed','close','history','log','activity','audit','acted',
+      'warehouse','position','reserved','receipt','issue','gate','pending','waiting','owner','next'])
+    &&!sub.byRef){
+    return 'I do not have an answer for that one.\n\n'
+      +'I can only read what is on this transaction and the board — status and step, who holds it and for how long, '
+      +'what is blocking it, its material position and documents, its activity log, and the reconciliation arithmetic. '
+      +'Anything outside that I would only be guessing at.\n\n'
+      +'Try *what is blocking this*, *where is the material*, *show me the documents*, or name a reference.';
   }
   // ---- default: the whole picture
   const r=scAgentRecon(t);
@@ -701,6 +903,13 @@ function scAgentHTML(){
         /* Suggestions belong to the LAST answer only. Left under every reply they pile up as the
            thread grows and it stops being obvious which ones still apply. */
         const last=i===thread.length-1&&!scAgentState.busy;
+        /* Actions come before suggestions: the point of the answer is usually to go and do
+           something about it, and the follow-up questions are the lesser path. */
+        const acts=(last&&(m.acts||[]).length)
+          ? '<div class="sca-acts">'+m.acts.map(function(x){
+              return '<button class="sca-act-btn" onclick="'+x.fn+'(this.dataset.id)" data-id="'+scEsc(x.id)+'">'
+                +scEsc(x.t)+'</button>';}).join('')+'</div>'
+          : '';
         const next=(last&&(m.next||[]).length)
           ? '<div class="sca-next">'
             +m.next.map(function(n){
@@ -714,7 +923,7 @@ function scAgentHTML(){
           ? '<div id="sca-stream">'+scAgentMd(scAgentPartial(m.text,m.shown||0))+'<span class="sca-caret"></span></div>'
           : scAgentMd(m.text);
         return '<div class="sca-row"><div class="sca-av">'+a.initials+'</div>'
-          +'<div class="sca-bubble-wrap"><div class="sca-bubble sca-bot">'+inner+'</div>'+next+'</div></div>';
+          +'<div class="sca-bubble-wrap"><div class="sca-bubble sca-bot">'+inner+'</div>'+acts+next+'</div></div>';
       }).join('')
       /* The thinking row names what it is reading. A spinner says "wait"; this says what for,
          which is the difference between a loading state and an assistant. */
@@ -723,8 +932,14 @@ function scAgentHTML(){
           +'<div class="sca-think"><span id="sca-think">'+scEsc((scAgentState.think||['Thinking'])[0])+'</span>'
           +'<i></i><i></i><i></i></div></div>'
         : '')
-    : '<div class="sca-empty"><div class="sca-empty-av">'+a.initials+'</div>'
-      +'<div class="sca-empty-t">'+a.name+'</div><div class="sca-empty-b">'+a.blurb+'</div></div>';
+    /* The empty state leads with a briefing rather than a description of the agent. Someone who
+       opens this panel wants to know what needs them, not what the panel is for. */
+    : '<div class="sca-brief"><div class="sca-brief-h"><div class="sca-av">'+a.initials+'</div>'
+        +'<div><div class="sca-brief-t">'+(scAgentState.agent==='recon'?'Reconciliation':'Your briefing')+'</div>'
+        +'<div class="sca-brief-s">'+scEsc(scAgentCtxLabel())+'</div></div></div>'
+      +'<div class="sca-bubble sca-bot">'
+        +(scAgentState.agent==='recon'?scAgentMd(scAgentAnswerRecon('explain reconciliation')):scAgentMd(scAgentBriefing()))
+      +'</div></div>';
 
   return '<div class="sca-head">'
       +'<div class="sca-head-l"><div class="sca-av sca-av-lg">'+a.initials+'</div>'
@@ -906,13 +1121,16 @@ function scAgentAsk(q){
   },700);
 
   setTimeout(function(){
-    let answer,next=[];
+    let answer,next=[],acts=[];
     try{
       answer=scAgentAnswer(q);
       next=scAgentFollowups(q,sub);
+      // Actions attach to the transaction the answer was ABOUT, whichever way it was resolved.
+      const about=sub.txn||scAgentCtx().txn;
+      acts=scAgentActions(about).map(function(x){return {t:x.t,fn:x.fn,id:about.id};});
     }catch(e){answer='I could not read that transaction cleanly just now. Reopen it from the board and ask me again.';}
     scAgentStopStream();
-    const msg={role:'bot',text:answer,next:next,shown:0,streaming:true};
+    const msg={role:'bot',text:answer,next:next,acts:acts,shown:0,streaming:true};
     thread.push(msg);
     scAgentRender();
     // Reveal in chunks. Larger steps for long answers so a board listing does not crawl.
@@ -1008,6 +1226,15 @@ function scAgentMount(){
 '.sca-bubble-wrap{max-width:88%;min-width:0}',
 '.sca-bubble{max-width:82%;padding:11px 13px;border-radius:14px;font-size:12.5px;line-height:1.68;word-break:break-word}',
 '.sca-bubble-wrap .sca-bubble{max-width:100%}',
+/* Actions read as the primary move — solid, dark — while the follow-up questions stay quiet. */
+'.sca-acts{margin-top:9px;display:flex;flex-wrap:wrap;gap:6px}',
+'.sca-act-btn{border:0;background:var(--navy,#0f172a);color:#fff;border-radius:8px;padding:7px 12px;',
+'  font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit;transition:opacity .15s}',
+'.sca-act-btn:hover{opacity:.85}',
+'.sca-brief{display:flex;flex-direction:column;gap:10px}',
+'.sca-brief-h{display:flex;align-items:center;gap:9px}',
+'.sca-brief-t{font-size:13px;font-weight:700;color:var(--navy,#0f172a)}',
+'.sca-brief-s{font-size:11.5px;color:var(--gray,#6a7282);margin-top:1px}',
 '.sca-next{margin-top:9px;display:flex;flex-wrap:wrap;gap:6px}',
 '.sca-chip-next{background:transparent;border-color:#cbd5e1;color:var(--gray,#6a7282);font-size:11px;padding:5px 10px}',
 '.sca-chip-next:hover{background:var(--card,#fff);border-color:var(--navy,#0f172a);color:var(--navy,#0f172a)}',
