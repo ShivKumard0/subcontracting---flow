@@ -3426,7 +3426,7 @@ function scInjectCss(){
 .sc-doc-sign div{display:flex;flex-direction:column-reverse;gap:8px}
 .sc-doc-sign span{font-size:10.5px;color:var(--gray)}
 .sc-doc-sign i{display:block;border-top:1px solid var(--navy);height:26px}
-@media print{.sidebar,.topbar,.sc-doc-back,.sc-doc-bar-top,.sc-doc-foot,#sc-agent-fab,#sc-agent-panel{display:none!important}
+@media print{.sidebar,.topbar,.sc-doc-back,.sc-doc-bar-top,.sc-doc-foot,#sc-agent-fab,#sc-agent-panel,#sc-agent-scrim{display:none!important}
   .sc-doc-panel{position:static;width:100%;box-shadow:none;border:0}}
 .sc-store-warn b{color:#78350f}
 .sc-new{display:inline-block;font-size:9.5px;font-weight:700;letter-spacing:.4px;color:#fff;background:#6d5bd0;border-radius:4px;padding:1px 6px;margin-right:7px;vertical-align:1px}

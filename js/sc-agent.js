@@ -564,6 +564,8 @@ function scAgentRender(){
   }
   const fab=document.getElementById('sc-agent-fab');
   if(fab)fab.classList.toggle('hidden',scAgentState.open);
+  const scrim=document.getElementById('sc-agent-scrim');
+  if(scrim)scrim.classList.toggle('on',scAgentState.open);
   host.classList.toggle('open',scAgentState.open);
 }
 
@@ -592,7 +594,13 @@ function scAgentToggle(){
         if(el)el.textContent=now;
       }
     },1200);
-  }else if(scAgentState.tick){clearInterval(scAgentState.tick);scAgentState.tick=null;}
+    // Escape closes it, which is the other half of what people expect once a scrim is up.
+    scAgentState.esc=function(e){if(e.key==='Escape'&&scAgentState.open)scAgentToggle();};
+    document.addEventListener('keydown',scAgentState.esc);
+  }else{
+    if(scAgentState.tick){clearInterval(scAgentState.tick);scAgentState.tick=null;}
+    if(scAgentState.esc){document.removeEventListener('keydown',scAgentState.esc);scAgentState.esc=null;}
+  }
 }
 function scAgentSwitch(id){scAgentState.agent=id;scAgentRender();}
 function scAgentSendInput(){
@@ -633,6 +641,14 @@ function scAgentMount(){
 '#sc-agent-fab:hover{transform:translateY(-2px);box-shadow:0 10px 26px rgba(15,23,42,.34)}',
 '#sc-agent-fab.hidden{opacity:0;pointer-events:none;transform:scale(.85)}',
 '#sc-agent-fab .sca-dot{position:absolute;top:9px;right:9px;width:8px;height:8px;border-radius:50%;background:#22c55e;border:2px solid var(--navy,#0f172a)}',
+/* The scrim blurs the page BEHIND it rather than blurring the app's own DOM: backdrop-filter
+   leaves the layout untouched, so nothing reflows and the panel above it stays perfectly sharp.
+   Filtering .page-content instead would blur the panel too if it were ever nested, and would
+   force a repaint of the whole board on every open. */
+'#sc-agent-scrim{position:fixed;inset:0;z-index:895;background:rgba(15,23,42,.16);',
+'  backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);',
+'  opacity:0;pointer-events:none;transition:opacity .24s ease}',
+'#sc-agent-scrim.on{opacity:1;pointer-events:auto}',
 '#sc-agent-panel{position:fixed;right:0;top:0;bottom:0;width:404px;max-width:100vw;z-index:900;background:var(--card,#fff);',
 '  border-left:1px solid var(--border,#e5e7eb);box-shadow:-14px 0 38px rgba(15,23,42,.10);',
 '  display:flex;flex-direction:column;font-family:Inter,sans-serif;color:var(--navy,#0f172a);',
@@ -703,6 +719,13 @@ function scAgentMount(){
 '@media (max-width:520px){#sc-agent-panel{width:100vw}}'
 ].join('\n');
   document.head.appendChild(css);
+
+  // Clicking the dimmed area closes the panel — the gesture people already expect from a
+  // slide-over, and the only way out other than the × once the background is not clickable.
+  const scrim=document.createElement('div');
+  scrim.id='sc-agent-scrim';
+  scrim.onclick=function(){if(scAgentState.open)scAgentToggle();};
+  document.body.appendChild(scrim);
 
   const fab=document.createElement('button');
   fab.id='sc-agent-fab';
