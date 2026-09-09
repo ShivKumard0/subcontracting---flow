@@ -395,7 +395,7 @@ function scAgentLine(t){
   return '· **'+(t.no||'Draft')+'** — '+(t.closed?('**'+t.status+'**')
       :('step '+t.step+' '+scStep(t.step).short+', with '+scActorLabel(t.pendingWith)))
     +(t.closed?'':', waiting '+scSince(t.pendingSince))
-    +(scOverdue(t)?'  ·  OVERDUE':'');
+    +(scOverdue(t)?' [[bad:overdue]]':'');
 }
 /* == THE QUESTIONS A MANAGER ASKS ===========================================================
    The copilot could count but not add up or compare, so "how much is stuck?" and "where is the
@@ -557,6 +557,36 @@ function scAgentPortfolio(q){
     +'\n\nName any reference — an SCR, PO, challan, ASN, IMR — and I will tell you where that one stands.';
 }
 
+/* People name a desk the way they say it out loud — "finance", "QC", "the stores guy" — not by the
+   label the app prints. The generic Vendor actor is deliberately absent: vendor questions belong to
+   the per-vendor comparison, and matching it here would answer "what is with the vendors" with one
+   persona's queue. */
+const SC_AGENT_ROLE_ALIASES={
+  planner:['planner','planning','pmg planner'],
+  'pmg-approver':['pmg','pmg approver'],
+  buyer:['buyer','procurement','purchasing'],
+  'po-approver':['po approver','purchase order approver'],
+  stores:['stores','store','warehouse','storekeeper'],
+  logistics:['logistics','transport','transporter','shipping','freight'],
+  'dn-approver':['dn approver','delivery note approver','dispatch'],
+  finance:['finance','f and a','fa','accounts','idt'],
+  security:['security','gate','guard'],
+  qc:['qc','quality','inspection','inspector']
+};
+/* LONGEST match wins, not the first one in SC_ACTORS. Scanning in order made "the PO approver" and
+   "the delivery note approver" both resolve to the PMG Approver, because it sits first and its
+   alias 'approver' is a substring of theirs. */
+function scAgentRoleAsked(q){
+  if(typeof SC_ACTORS==='undefined')return null;
+  let hit=null,best=0;
+  SC_ACTORS.forEach(function(a){
+    if(!SC_AGENT_ROLE_ALIASES[a.id])return;
+    [a.label,a.name].concat(SC_AGENT_ROLE_ALIASES[a.id]).forEach(function(w){
+      if(w.length>best&&scAgentMatch(q,[w])){best=w.length;hit=a;}
+    });
+  });
+  return hit;
+}
 function scAgentAnswerAskDeal(q){
   const c=scAgentCtx();
   const sub=scAgentSubject(q);
@@ -590,6 +620,29 @@ function scAgentAnswerAskDeal(q){
         return '· **'+(x.no||'Draft')+'** — step '+x.step+' '+scStep(x.step).short+', '+scSince(x.pendingSince)
           +(g?'\n   blocked: '+g:'');}).join('\n')
       +'\n\n'+(actor&&actor.focus?actor.focus:'');
+  }
+  /* "What is with Finance?" / "what is QC holding?" — a desk other than your own. These all fell
+     through to the out-of-scope fallback, which is the wrong answer to something the board can
+     answer exactly; a manager asks about someone else's queue far more often than their own. */
+  /* A named reference always wins outright — otherwise "is logistics required on SUB-2026-00009"
+     reads as a question about the Logistics desk and answers with its queue. Everything else needs
+     both a desk and a queue word, which is specific enough to fire even with a record on screen. */
+  const desk=(!sub.byRef)?scAgentRoleAsked(q):null;
+  if(desk&&scAgentMatch(q,['queue','holding','holds','sitting','desk','backlog',
+                           'with','has','have','hold','pending','waiting','stuck','doing','side'])){
+    const held=scState.txns.filter(function(x){return !x.closed&&x.pendingWith===desk.id;})
+      .filter(scAgentCanSee)
+      .sort(function(a,b){return scAgentHours(b.pendingSince)-scAgentHours(a.pendingSince);});
+    if(!held.length)return 'Nothing is with **'+desk.label+'** right now.\n\n'
+      +(desk.focus||'')+'\n\nAsk me *where is the bottleneck* to see which desk is actually holding work.';
+    return '**'+held.length+'** transaction'+(held.length===1?' is':'s are')+' with **'+desk.label
+      +'** ('+desk.name+'), longest waiting first:\n\n'
+      +held.slice(0,8).map(function(x){
+        const g=scAgentGate(x);
+        return '· **'+(x.no||'Draft')+'** — step '+x.step+' '+scStep(x.step).short+', '+scSince(x.pendingSince)
+          +(scOverdue(x)?' [[bad:overdue]]':'')+(g?'\n   blocked: '+g:'');}).join('\n')
+      +(held.length>8?'\n\n…and **'+(held.length-8)+'** more.':'')
+      +'\n\n'+(desk.focus||'');
   }
   /* The same honesty test with NOTHING open. This lived only inside the per-transaction branch,
      so from the dashboard "tell me a joke" fell through to the board listing and answered
@@ -821,10 +874,11 @@ function scAgentAnswerRecon(q){
     if(figuresClear&&!gate)
       return 'Nothing is blocking closure. Pending receivable is nil and all issue material is accounted for, so **Confirm Full Receipt** is available to '+scActorLabel(t.pendingWith)+'.';
     let a='**Closure is blocked.** '+gate+'\n\nFR17.7 requires all of these before full receipt can be confirmed:\n\n'
-      +'· Pending receivable = 0 — currently **'+r.pending+'**'+(r.pending?'  NOT MET':'  met')+'\n'
-      +'· Outstanding issue qty = 0 — currently **'+r.outstanding+'**'+(r.outstanding?'  NOT MET':'  met')+'\n'
-      +'· Every scrap quantity has a reason'+(r.scrapMissingReason?'  NOT MET':'  met')+'\n'
-      +'· Every returned quantity has a reason'+(r.returnMissingReason?'  NOT MET':'  met')+' and a receiving location'+(r.returnMissingLocation?'  NOT MET':'  met');
+      +'· Pending receivable = 0 — currently **'+r.pending+'** '+(r.pending?'[[bad:not met]]':'[[ok:met]]')+'\n'
+      +'· Outstanding issue qty = 0 — currently **'+r.outstanding+'** '+(r.outstanding?'[[bad:not met]]':'[[ok:met]]')+'\n'
+      +'· Every scrap quantity has a reason '+(r.scrapMissingReason?'[[bad:not met]]':'[[ok:met]]')+'\n'
+      +'· Every returned quantity has a reason and location '
+        +((r.returnMissingReason||r.returnMissingLocation)?'[[bad:not met]]':'[[ok:met]]');
     if(r.pending>0)a+='\n\nTo clear the pending receivable you either receive the balance, or **short-close** it with a reason and remarks.';
     if(r.outstanding!==0)a+='\n\nTo clear the outstanding issue material, book the '+r.outstanding+' remaining units on the reconciliation lines as **returned** (with a reason and a receiving storage location) or as **scrap** (with a reason).';
     return a;
@@ -890,9 +944,19 @@ function scAgentMd(s){
     .replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')
     .replace(/\*(.+?)\*/g,'<i>$1</i>');
   h=scAgentLinkify(h);
+  /* Status markers become pills. A twenty-line answer whose verdicts read "met" and "NOT MET" in
+     the same grey as everything else — at the end of lines that wrap — is the FR17.7 checklist's
+     whole point rendered invisibly. Authored as [[ok:…]] / [[bad:…]] so the answer strings stay
+     readable prose. */
+  h=h.replace(/\[\[(ok|bad):([^\]]+)\]\]/g,function(m,k,txt){
+    return '<span class="sca-flag sca-flag-'+k+'">'+txt+'</span>';
+  });
   return h.split('\n').map(function(l){
     if(/^·\s/.test(l))return '<div class="sca-li">'+l.replace(/^·\s/,'')+'</div>';
     if(/^\s{3}/.test(l))return '<div class="sca-sub">'+l.trim()+'</div>';
+    /* A line that is ENTIRELY bold is a section heading, not an emphasised sentence. Rendering
+       both the same way left long answers as a flat wall with nothing to scan by. */
+    if(/^<b>[^<]*<\/b>$/.test(l.trim()))return '<div class="sca-h">'+l.trim().replace(/<\/?b>/g,'')+'</div>';
     return l.trim()?'<div class="sca-p">'+l+'</div>':'<div class="sca-gap"></div>';
   }).join('');
 }
@@ -932,8 +996,14 @@ function scAgentHTML(){
         const inner=m.streaming
           ? '<div id="sca-stream">'+scAgentMd(scAgentPartial(m.text,m.shown||0))+'<span class="sca-caret"></span></div>'
           : scAgentMd(m.text);
+        /* A finished answer gets the two things every chat surface has and this one did not: when
+           it was said, and a way to take it with you. Both appear on hover so they cost nothing
+           visually until wanted. */
+        const meta=m.streaming?''
+          :'<div class="sca-meta"><span>'+scEsc(m.at||'')+'</span>'
+            +'<button class="sca-copy" onclick="scAgentCopy(this)" title="Copy this answer">Copy</button></div>';
         return '<div class="sca-row"><div class="sca-av">'+a.initials+'</div>'
-          +'<div class="sca-bubble-wrap"><div class="sca-bubble sca-bot">'+inner+'</div>'+acts+next+'</div></div>';
+          +'<div class="sca-bubble-wrap"><div class="sca-bubble sca-bot">'+inner+'</div>'+meta+acts+next+'</div></div>';
       }).join('')
       /* The thinking row names what it is reading. A spinner says "wait"; this says what for,
          which is the difference between a loading state and an assistant. */
@@ -962,7 +1032,10 @@ function scAgentHTML(){
     +'<div class="sca-tabs">'+SC_AGENTS.map(function(x){
         return '<button class="sca-tab'+(x.id===scAgentState.agent?' on':'')+'" onclick="scAgentSwitch(\''+x.id+'\')">'+x.name+'</button>';
       }).join('')+'</div>'
-    +'<div class="sca-body" id="sca-body">'+body+'</div>'
+    /* Scrolling back to re-read a long answer used to mean losing your place the moment the next
+       one arrived. The list now stays where you put it and offers a way back down. */
+    +'<div class="sca-body-wrap"><div class="sca-body" id="sca-body" onscroll="scAgentOnScroll(this)">'+body+'</div>'
+      +'<button class="sca-jump" id="sca-jump" hidden onclick="scAgentToBottom(true)">Jump to latest ↓</button></div>'
     /* The starter prompts are an EMPTY-STATE affordance. Once the conversation has started the
        contextual "next" chips under the last answer do the same job better, and showing both left
        two competing chip areas stacked above the input — four rows of static suggestions pushing
@@ -971,20 +1044,39 @@ function scAgentHTML(){
       :'<div class="sca-chips">'+a.prompts.slice(0,5).map(function(p){
         return '<button class="sca-chip" onclick="scAgentAsk(this.dataset.q)" data-q="'+p.replace(/"/g,'&quot;')+'">'+p+'</button>';
       }).join('')+'</div>')
-    // Visibly inert while busy, rather than silently ignoring what is typed into it.
+    /* A textarea, not an input: Enter sends and Shift+Enter starts a line, which is what people
+       expect of a chat box and what lets a longer question be composed without it scrolling
+       sideways. It grows with the content up to a few lines. While an answer is streaming the
+       send button becomes Stop. */
     +'<div class="sca-input">'
-      +'<input id="sca-q" placeholder="'+(scAgentState.busy?'Answering…':'Ask about any transaction, or quote a reference…')+'" autocomplete="off" '
-        +(scAgentState.busy?'disabled ':'')
-        +'onkeydown="if(event.key===\'Enter\'){event.preventDefault();scAgentSendInput();}">'
-      +'<button class="sca-send'+(scAgentState.busy?' sca-send-off':'')+'"'+(scAgentState.busy?' disabled':'')
-        +' onclick="scAgentSendInput()" aria-label="Send">'
-        +'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>'
-      +'</button>'
+      +'<textarea id="sca-q" rows="1" placeholder="'+(scAgentState.busy?'Answering…':'Ask about any transaction, or quote a reference…')+'"'
+        +(scAgentState.busy?' disabled':'')
+        +' oninput="scAgentGrow(this)"'
+        +' onkeydown="if(event.key===\'Enter\'&amp;&amp;!event.shiftKey){event.preventDefault();scAgentSendInput();}"></textarea>'
+      +(scAgentState.busy
+        ? '<button class="sca-send sca-stop" onclick="scAgentStopAnswer()" aria-label="Stop">'
+          +'<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>'
+        : '<button class="sca-send" onclick="scAgentSendInput()" aria-label="Send">'
+          +'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg></button>')
     +'</div>'
     // One line. Two wrapped to three rows on a 404px panel and ate the space the answer needed.
     +'<div class="sca-foot">Read-only · generated from live data</div>';
 }
 
+function scAgentAtBottom(b){
+  return !b||(b.scrollHeight-b.scrollTop-b.clientHeight)<48;
+}
+function scAgentOnScroll(b){
+  const j=document.getElementById('sca-jump');
+  if(j)j.hidden=scAgentAtBottom(b);
+}
+function scAgentToBottom(smooth){
+  const b=document.getElementById('sca-body');
+  if(!b)return;
+  if(smooth&&b.scrollTo)b.scrollTo({top:b.scrollHeight,behavior:'smooth'});
+  else b.scrollTop=b.scrollHeight;
+  const j=document.getElementById('sca-jump');if(j)j.hidden=true;
+}
 function scAgentRender(){
   const host=document.getElementById('sc-agent-panel');
   if(!host)return;
@@ -995,13 +1087,21 @@ function scAgentRender(){
   const hadFocus=!!(old&&document.activeElement===old);
   const draft=old?old.value:'';
 
+  // Keep the reader's place across the rebuild if they had scrolled up to re-read something.
+  const prev=document.getElementById('sca-body');
+  const wasAtBottom=scAgentAtBottom(prev);
+  const prevTop=prev?prev.scrollTop:0;
+
   host.innerHTML=scAgentHTML();
   const b=document.getElementById('sca-body');
-  if(b)b.scrollTop=b.scrollHeight;
+  if(b){
+    if(wasAtBottom)b.scrollTop=b.scrollHeight;
+    else{b.scrollTop=prevTop;scAgentOnScroll(b);}
+  }
 
   const now=document.getElementById('sca-q');
   if(now){
-    if(draft)now.value=draft;
+    if(draft){now.value=draft;scAgentGrow(now);}
     if(hadFocus)now.focus();
   }
   const fab=document.getElementById('sc-agent-fab');
@@ -1050,6 +1150,48 @@ function scAgentToggle(){
     scAgentState.busy=false;
   }
 }
+/* Copy the answer as the plain text it was authored as, not as the rendered HTML — pasting a
+   wall of <div class="sca-li"> into an email is worse than not offering copy at all. */
+function scAgentCopy(btn){
+  const wrap=btn&&btn.closest?btn.closest('.sca-bubble-wrap'):null;
+  const body=wrap?wrap.querySelector('.sca-bubble'):null;
+  const text=body?body.innerText:'';
+  const done=function(){btn.textContent='Copied';setTimeout(function(){btn.textContent='Copy';},1400);};
+  /* The async clipboard rejects on a non-secure origin, without focus, or with the permission
+     denied — and a silent rejection leaves the button saying "Copy" with nothing on the clipboard.
+     So the old execCommand route is the rejection handler, not just the no-API branch. */
+  const fallback=function(){
+    const ta=document.createElement('textarea');ta.value=text;
+    ta.style.position='fixed';ta.style.top='-1000px';ta.style.opacity='0';
+    document.body.appendChild(ta);ta.select();
+    let ok=false;try{ok=document.execCommand('copy');}catch(e){}
+    ta.remove();
+    if(ok)done();
+    else{btn.textContent='Select and copy';setTimeout(function(){btn.textContent='Copy';},1800);}
+  };
+  if(navigator.clipboard&&navigator.clipboard.writeText)
+    navigator.clipboard.writeText(text).then(done,fallback);
+  else fallback();
+}
+// Finish the answer immediately. A 1.4s stream is short, but a control that cannot be stopped
+// reads as a canned animation rather than something being produced.
+function scAgentStopAnswer(){
+  const thread=scAgentThread();
+  /* Stop has to cancel the PENDING answer too, not just the stream. Pressing it during the
+     thinking phase cleared `busy` while the timer kept running, so the answer arrived a moment
+     later on a conversation that had been stopped — and the panel was left with a user message
+     and no reply until it did. */
+  const pending=scAgentState.busy&&!thread.some(function(m){return m.streaming;});
+  if(scAgentState.askTimer){clearTimeout(scAgentState.askTimer);scAgentState.askTimer=null;}
+  scAgentStopStream();
+  thread.forEach(function(m){if(m.streaming){m.shown=m.text.length;m.streaming=false;}});
+  if(pending)thread.push({role:'bot',text:'Stopped. Ask me again whenever you want it.',
+    next:[],acts:[],at:(typeof scNow==='function'?String(scNow()).split(',').pop():'').trim(),
+    shown:0,streaming:false});
+  scAgentState.busy=false;
+  scAgentRender();
+  scAgentFocusInput();
+}
 function scAgentSwitch(id){
   if(id===scAgentState.agent)return;
   /* Finish the OUTGOING thread's stream before leaving it. Closing the panel already did this;
@@ -1068,6 +1210,25 @@ function scAgentReset(){
   scAgentStopStream();
   scAgentState.threads={};scAgentState.busy=false;
   scAgentRender();
+}
+/* Put the caret back in the composer once an answer lands. The input is DISABLED while the
+   answer is being produced, so the browser drops focus the instant you press Enter — and
+   scAgentRender's carry-the-focus trick cannot help, because by the next render nothing was
+   focused to carry. Every follow-up question then needed a click first. */
+function scAgentFocusInput(){
+  if(!scAgentState.open)return;
+  const i=document.getElementById('sca-q');
+  if(!i||i.disabled)return;
+  // Never steal the caret out from under someone highlighting an answer to copy it by hand.
+  const sel=window.getSelection?window.getSelection():null;
+  if(sel&&sel.toString())return;
+  i.focus();
+}
+// Grow with the text, to a ceiling — beyond that it scrolls rather than eating the panel.
+function scAgentGrow(el){
+  if(!el)return;
+  el.style.height='auto';
+  el.style.height=Math.min(96,el.scrollHeight)+'px';
 }
 function scAgentSendInput(){
   const i=document.getElementById('sca-q');
@@ -1130,7 +1291,8 @@ function scAgentAsk(q){
     if(el&&scAgentState.think[scAgentState.thinkAt])el.textContent=scAgentState.think[scAgentState.thinkAt];
   },700);
 
-  setTimeout(function(){
+  scAgentState.askTimer=setTimeout(function(){
+    scAgentState.askTimer=null;
     let answer,next=[],acts=[];
     try{
       answer=scAgentAnswer(q);
@@ -1140,7 +1302,9 @@ function scAgentAsk(q){
       acts=scAgentActions(about).map(function(x){return {t:x.t,fn:x.fn,id:about.id};});
     }catch(e){answer='I could not read that transaction cleanly just now. Reopen it from the board and ask me again.';}
     scAgentStopStream();
-    const msg={role:'bot',text:answer,next:next,acts:acts,shown:0,streaming:true};
+    // Time of the answer, in the app's own format, trimmed to the clock part.
+    const stamp=(typeof scNow==='function'?String(scNow()).split(',').pop():'').trim();
+    const msg={role:'bot',text:answer,next:next,acts:acts,at:stamp,shown:0,streaming:true};
     thread.push(msg);
     scAgentRender();
     // Reveal in chunks. Larger steps for long answers so a board listing does not crawl.
@@ -1152,6 +1316,7 @@ function scAgentAsk(q){
         scAgentStopStream();
         scAgentState.busy=false;
         scAgentRender();                       // full render brings in the follow-up chips
+        scAgentFocusInput();
         return;
       }
       const el=document.getElementById('sca-stream');
@@ -1162,7 +1327,7 @@ function scAgentAsk(q){
         const atBottom=!b||(b.scrollHeight-b.scrollTop-b.clientHeight)<48;
         el.innerHTML=scAgentMd(scAgentPartial(answer,msg.shown))+'<span class="sca-caret"></span>';
         if(b&&atBottom)b.scrollTop=b.scrollHeight;
-      }else{scAgentStopStream();scAgentState.busy=false;scAgentRender();}
+      }else{scAgentStopStream();scAgentState.busy=false;scAgentRender();scAgentFocusInput();}
     },16);
   },520+Math.min(900,q.length*10));
 }
@@ -1252,6 +1417,26 @@ function scAgentMount(){
 '  box-shadow:0 1px 2px rgba(15,23,42,.04)}',
 '.sca-bot b{font-weight:650}',
 '.sca-me{background:var(--navy,#0f172a);color:#fff;border-top-right-radius:5px}',
+/* Section heading inside a long answer — enough to scan by, not enough to shout. */
+'.sca-h{font-size:10px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--gray,#6a7282);',
+'  margin:11px 0 3px;padding-bottom:3px;border-bottom:1px solid var(--border,#e5e7eb)}',
+'.sca-h:first-child{margin-top:0}',
+'.sca-flag{display:inline-block;font-size:9.5px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;',
+'  padding:1px 6px;border-radius:4px;vertical-align:1px;white-space:nowrap}',
+'.sca-flag-ok{background:rgba(34,197,94,.13);color:#15803d}',
+'.sca-flag-bad{background:rgba(239,68,68,.12);color:#b91c1c}',
+/* Timestamp and copy: present but quiet, and only legible on hover. */
+'.sca-meta{display:flex;align-items:center;gap:8px;margin-top:5px;font-size:10px;color:var(--gray,#6a7282);',
+'  opacity:0;transition:opacity .15s}',
+'.sca-bubble-wrap:hover .sca-meta,.sca-meta:focus-within{opacity:1}',
+'.sca-copy{border:0;background:transparent;color:var(--gray,#6a7282);font-size:10px;font-weight:600;',
+'  cursor:pointer;padding:1px 4px;border-radius:4px;font-family:inherit}',
+'.sca-copy:hover{background:var(--ol,#f1f5f9);color:var(--navy,#0f172a)}',
+'.sca-stop{background:#b91c1c}',
+'.sca-jump{position:absolute;left:50%;transform:translateX(-50%);bottom:12px;z-index:3;border:1px solid var(--border,#e5e7eb);',
+'  background:var(--card,#fff);color:var(--navy,#0f172a);border-radius:16px;padding:5px 12px;font-size:11px;',
+'  font-weight:600;cursor:pointer;font-family:inherit;box-shadow:0 3px 10px rgba(15,23,42,.12)}',
+'.sca-body-wrap{position:relative;flex:1;display:flex;min-height:0}',
 '.sca-p{margin:0}',
 '.sca-gap{height:7px}',
 /* A reference reads as the identifier it is, and is obviously tappable — underlined on a dotted
@@ -1293,10 +1478,13 @@ function scAgentMount(){
 '  transition:border-color .15s,background .15s}',
 '.sca-chip:hover{border-color:var(--navy,#0f172a);background:var(--ol,#f1f5f9)}',
 '.sca-input{display:flex;gap:8px;align-items:center;padding:12px 16px 8px;flex-shrink:0}',
-'.sca-input input{flex:1;border:1px solid var(--border,#e5e7eb);border-radius:10px;padding:10px 12px;font-size:12.5px;',
-'  font-family:inherit;color:var(--navy,#0f172a);outline:none;',
+'.sca-input textarea{flex:1;border:1px solid var(--border,#e5e7eb);border-radius:10px;padding:10px 12px;font-size:12.5px;',
+'  font-family:inherit;color:var(--navy,#0f172a);outline:none;resize:none;line-height:1.5;',
+'  max-height:96px;overflow-y:auto;',
 '  transition:border-color .15s,box-shadow .15s;min-width:0}',
-'.sca-input input:focus{border-color:var(--navy,#0f172a);box-shadow:0 0 0 3px rgba(15,23,42,.07)}',
+'.sca-input textarea:focus{border-color:var(--navy,#0f172a);box-shadow:0 0 0 3px rgba(15,23,42,.07)}',
+'.sca-input textarea:disabled{background:var(--ol,#f1f5f9);color:var(--gray,#6a7282);cursor:not-allowed}',
+'.sca-input{align-items:flex-end}',
 '.sca-send{width:36px;height:36px;border-radius:10px;border:0;background:var(--navy,#0f172a);color:#fff;cursor:pointer;',
 '  display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:opacity .15s}',
 '.sca-send:hover{opacity:.86}',

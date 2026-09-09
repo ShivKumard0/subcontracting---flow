@@ -1300,7 +1300,8 @@ function scSeed(){
     const aged=over.age!==undefined;
     if(aged){t.pendingSince=new Date(Date.now()-over.age*3600000).toISOString();
       t.createdAt=scNow();delete over.age;}
-    const close=over.close,reject=over.reject;delete over.close;delete over.reject;
+    const close=over.close,reject=over.reject,recvPct=over.recvPct;
+    delete over.close;delete over.reject;delete over.recvPct;
     Object.assign(t,over);
     /* Logged BEFORE the walk, because it happened before the walk. Pushing it afterwards left
        the array out of chronological order, and the seed runs fast enough that the timestamps
@@ -1366,10 +1367,16 @@ function scSeed(){
            reconciliation still read "Received 0, Pending 500". */
         if(s===16&&!t.imr.receivedQty){
           if(!t.imr.no)t.imr.no=scNextNo('imr');
-          t.imr.receivedQty=t.scr.recvQty;
+          /* `recvPct` books a SHORT receipt. Every seeded record used to receive the full expected
+             quantity, so pending receivable and outstanding issue material were nil on all thirty
+             — the reconciliation step was a rubber stamp, the FR17.7 gate never fired, and "why
+             can I not close this" had no true answer anywhere on the board. One record now comes
+             back short, which is what reconciliation exists for. */
+          const rq=Math.round(Number(t.scr.recvQty||0)*(recvPct===undefined?1:recvPct));
+          t.imr.receivedQty=rq;
           t.imr.receivingLocation='FG-WH/FG-01';t.imr.receivedBy='stores';t.imr.receiptAt=scNow();
           // Mirror what a real confirmation does, so a seeded reconciliation has stock behind it.
-          scReceiveMaterial(t,Number(t.scr.recvQty||0));}
+          scReceiveMaterial(t,rq);}
       }
       // `age` was deleted from `over` above, so testing it here was always true and the seeded
       // ageing was overwritten with (2+step) hours on every record past step 1.
@@ -1413,7 +1420,9 @@ function scSeed(){
     [9,{v:1,age:38}],                    [10,{age:12}], [10,{v:2,billable:'No',age:44}],
     [11,{age:13}], [12,{age:8}],         [13,{age:21}], [13,{v:1,age:63}],
     [14,{age:16}], [14,{v:2,age:47}],    [15,{age:9}],  [16,{age:18}],
-    [16,{v:1,qty:600,age:35}],           [17,{age:19}], [17,{v:2,age:58}],
+    // One of the two reconciliation records came back short (240 of 300), so the FR17.7 gate,
+    // short-close and the return/scrap booking all have a record to act on.
+    [16,{v:1,qty:600,age:35}],           [17,{age:19,recvPct:0.8}], [17,{v:2,age:58}],
     [18,{age:24}],
     [18,{close:true,age:96}],            [18,{v:1,close:true,age:150}],
     [2,{reject:'SCRJ-01',age:120}]
@@ -1424,6 +1433,7 @@ function scSeed(){
     const over={age:o.age};
     if(o.close)over.close=true;
     if(o.reject)over.reject=o.reject;
+    if(o.recvPct!==undefined)over.recvPct=o.recvPct;
     over.scrOver={
       vendor:V[vi],vendorAddress:ADR[vi],
       title:TITLES[i%TITLES.length]+' — '+(vi===0?'ABC':vi===1?'Larsen':'Precision'),
