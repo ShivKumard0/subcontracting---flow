@@ -40,8 +40,18 @@ let scAgentState={open:false,agent:'ask-deal',threads:{},ctx:'',busy:false,tick:
 function scAgentCtx(){
   const txn=(typeof scOpenTxnId!=='undefined'&&typeof scTxn==='function')?scTxn(scOpenTxnId):null;
   const me=typeof activePersonaId!=='undefined'?activePersonaId:'';
-  const onTxnPage=typeof currentPage!=='undefined'?currentPage==='sc-txn':!!txn;
-  return {txn:(onTxnPage?txn:null),me:me,actor:(typeof scActor==='function'?scActor(me):null)};
+  /* The app's page variable is `page`. This tested `currentPage`, which is defined nowhere in
+     the codebase, so the guard always fell through to `!!txn` — and since scOpenTxnId is only
+     ever cleared by scBackToDash, the copilot believed a transaction was "on screen" on every
+     page of the app, indefinitely after it had last been opened. */
+  const pg=typeof page!=='undefined'?page:'';
+  const onTxnPage=pg?pg==='sc-txn':!!txn;
+  /* AND the permission check belongs here too. The byRef routes enforce FR13.1 correctly, but
+     this fallback returned the open record with no check at all — so a vendor who switched
+     persona while another vendor's transaction was open could read it in full, and the panel
+     header named it before a question was even asked. */
+  const visible=(onTxnPage&&txn&&scAgentCanSee(txn))?txn:null;
+  return {txn:visible,me:me,actor:(typeof scActor==='function'?scActor(me):null)};
 }
 function scAgentCtxLabel(){
   const c=scAgentCtx();
@@ -60,26 +70,66 @@ function scAgentCtxLabel(){
 function scAgentRejected(t){
   return !!t&&(t.status==='Rejected'||scDocStatus(t,'scr')==='Rejected');
 }
-function scAgentClone(t){try{return JSON.parse(JSON.stringify(t));}catch(e){return t;}}
-function scAgentRecon(t){try{return scComputeRecon(scAgentClone(t));}catch(e){return {};}}
-function scAgentGate(t){try{return scGateBlock(scAgentClone(t));}catch(e){return '';}}
+// One sentence for a rejected transaction, so every branch tells the same story.
+function scAgentRejectedLine(t){
+  const rj=(t.activity||[]).filter(function(a){return a.reasonSet==='RC-SCRREJ';}).pop();
+  return '**'+(t.no||'This transaction')+'** was **rejected** at SCR approval'
+    +(rj&&rj.by?' by '+rj.by:'')+', so it never proceeded.'
+    +(rj&&rj.reason?'\n\nReason — '+rj.reasonCode+': '+rj.reason:'')
+    +(rj&&rj.remarks?'\n"'+rj.remarks+'"':'')
+    +'\n\nFR2.9 stops a rejected SCR there: no PO is created, no shipment is raised and no material moves. It is retained for audit only.';
+}
+/* Returning the LIVE object from the catch would hand it to scComputeRecon, which writes onto
+   txn.recon — the one thing this file must never do. Null instead, and the callers cope. */
+function scAgentClone(t){try{return JSON.parse(JSON.stringify(t));}catch(e){return null;}}
+function scAgentRecon(t){const c=scAgentClone(t);if(!c)return {};try{return scComputeRecon(c);}catch(e){return {};}}
+function scAgentGate(t){const c=scAgentClone(t);if(!c)return '';try{return scGateBlock(c);}catch(e){return '';}}
 
 /* == THE ANSWERS ===========================================================================
    Intent matching is deliberately shallow — a handful of keyword groups — because the value is
    in the DERIVATION, not the parsing. Each branch reads the record and states what is actually
    true of it. == */
-function scAgentMatch(q,words){q=' '+q.toLowerCase()+' ';return words.some(function(w){return q.indexOf(w)>-1;});}
+/* WORD BOUNDARIES, NOT SUBSTRINGS. A bare indexOf matched 'log' inside "logistics", 'late'
+   inside "PLATE-001" (a real item code here), 'how' inside "show", 'who' inside "whole" and
+   'count' inside "unaccounted" — so "is logistics required?" returned the activity log and
+   "what is the PLATE-001 reservation?" returned the blocker. A phrase containing a space is
+   still matched as a phrase; single words must stand alone. */
+function scAgentMatch(q,words){
+  const s=' '+String(q||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()+' ';
+  return words.some(function(w){
+    const t=String(w).toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+    return t&&s.indexOf(' '+t+' ')>-1;
+  });
+}
+// Prefix match, for the cases where a stem genuinely is the intent ("calculate/calculated").
+function scAgentStem(q,stems){
+  const s=' '+String(q||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()+' ';
+  return stems.some(function(w){return s.indexOf(' '+w)>-1;});
+}
 
 /* == ASKING ABOUT ANY TRANSACTION, NOT JUST THE OPEN ONE ====================================
    The copilot used to answer only about whatever was on screen, which made it a caption for the
    current page rather than something you could interrogate. A transaction is identifiable by any
    of the ELEVEN numbers it carries — SUB, PO, SHP, OUT, TO, DN, CH, GP, ASN, IMR, BOM — and a
    user quoting any of them means the same record, so all of them resolve. == */
-const SC_AGENT_REF_RX=/\b(?:SUB|PO|SHP|OUT|TO|DN|CH|GP|ASN|IMR|BOM)[-\/ ]?\d{4}[-\/ ]?\d{2,6}\b/ig;
+/* The short prefixes need a REAL separator. With the separator optional, "up to 2026-09-30" in
+   a question matched TO + 2026 + 09, so a date-bounded board question was answered with "I
+   cannot find TO 2026-09" — and because a token had matched, the board route was skipped
+   entirely. Three-letter prefixes are distinctive enough to stay lenient. */
+const SC_AGENT_REF_RX=/\b(?:(?:SUB|SHP|OUT|ASN|IMR|BOM)[-\/ ]?\d{4}[-\/ ]?\d{2,6}|(?:PO|TO|DN|CH|GP)[-\/]\d{4}[-\/]?\d{2,6})\b/ig;
 function scAgentNorm(s){return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');}
 function scAgentDocNos(t){
   return [t.no,t.po.no,t.shipment.no,t.shipment.outboundKey,t.shipment.transferOrder,
     t.dn.no,t.challan.no,t.challan.gatePassNo,t.asn.no,t.imr.no,t.bomRef]
+    .filter(Boolean).map(scAgentNorm);
+}
+/* The references a person quotes but that are not documents OF the transaction — the production
+   order or project it was raised against, and the receivable product code. Every non-draft record
+   carries a production order and it is on the screen as "Project / Order", so a Planner quoting
+   the number they work from was told it did not exist. Kept separate from scAgentDocNos because
+   many transactions share one, so it identifies a SET, not a record. */
+function scAgentContextNos(t){
+  return [t.scr&&t.scr.prodOrder,t.scr&&t.scr.project,t.product&&t.product.code]
     .filter(Boolean).map(scAgentNorm);
 }
 function scAgentResolve(token){
@@ -90,16 +140,30 @@ function scAgentResolve(token){
   /* A bare tail ("00151", "151") is how people actually say these out loud. Matched on the END
      of the stored number rather than the whole of it, because the part a person repeats is the
      sequence, not the SUB-2026- prefix they share with every other record. */
+  /* A bare tail must match a WHOLE trailing segment, not any suffix. `slice(-n)` meant "0002"
+     matched every number ending in 2, so it resolved to whichever record happened to come first
+     — SUB-2026-00002 when the user meant shipment SHP-2026-0002, with nothing to signal a guess.
+     Compared against the last dash-delimited segment of the original number instead. */
   const digits=want.replace(/^[A-Z]+/,'');
   const tail=digits.replace(/^0+/,'');
-  // Length checked on the DIGITS, not on the zero-stripped tail: "00009" is a five-digit
-  // reference, and testing the stripped "9" skipped the whole branch as too short to be meant.
-  if(digits.length>=2&&tail.length)hit=scState.txns.find(function(t){
-    return scAgentDocNos(t).some(function(n){
-      const nt=n.replace(/^[A-Z]+/,'');
-      return nt.replace(/^0+/,'')===tail||nt.slice(-tail.length).replace(/^0+/,'')===tail;
-    });
-  });
+  if(digits.length>=2&&tail.length){
+    const seg=function(t){
+      return [t.no,t.po.no,t.shipment.no,t.shipment.outboundKey,t.shipment.transferOrder,
+        t.dn.no,t.challan.no,t.challan.gatePassNo,t.asn.no,t.imr.no,t.bomRef]
+        .filter(Boolean).map(function(n){return String(n).split(/[-\/]/).pop().replace(/^0+/,'');});
+    };
+    const hits=scState.txns.filter(function(t){return seg(t).indexOf(tail)>-1;});
+    /* A bare tail is nearly always the SCR's — that is the number on the header, on the board and
+       in every conversation. So when exactly one candidate matches on its SCR number, take it;
+       ambiguity is only real when several SCRs match, or when none does and several documents
+       do. Without this, "00013" matched six records (the SCR plus five documents ending 13) and
+       the copilot asked which one for the most ordinary reference there is. */
+    const scrHits=hits.filter(function(t){return String(t.no||'').split(/[-\/]/).pop().replace(/^0+/,'')===tail;});
+    if(scrHits.length===1)return scrHits[0];
+    const pool=scrHits.length?scrHits:hits;
+    if(pool.length>1)return {ambiguous:pool};
+    hit=pool[0];
+  }
   return hit||null;
 }
 /* WHO MAY ASK ABOUT WHAT. Internal roles all work for the same company and already see every
@@ -110,7 +174,17 @@ function scAgentCanSee(txn){
   const me=typeof activePersonaId!=='undefined'?scActor(activePersonaId):null;
   if(!me||!txn)return true;
   if(!me.vendorCode)return true;                       // internal role
-  return !txn.scr.vendor||txn.scr.vendor===me.vendorCode;
+  /* FAIL CLOSED. This read `!txn.scr.vendor || ...`, so a record with no vendor — an inter-unit
+     SCR, or any draft before a vendor is chosen — was visible to EVERY vendor login. A missing
+     value is not a grant. */
+  if(!txn.scr.vendor)return false;
+  if(txn.scr.vendor!==me.vendorCode)return false;
+  /* And no wider than the board. scVisibleTo is pending-with or participant, so a vendor reaches
+     its own transactions only from step 13; without this the copilot listed that vendor's
+     unapproved SCRs and draft POs, which the screen never shows and FR13.1 does not grant
+     ("its own applicable APPROVED POs"). One rule, enforced in one place. */
+  if(typeof scVisibleTo==='function')return scVisibleTo(txn,me.id);
+  return true;
 }
 /* What the question is ABOUT: a transaction named by reference, else the one on screen. */
 function scAgentSubject(q){
@@ -118,9 +192,15 @@ function scAgentSubject(q){
   if(tokens&&tokens.length){
     for(let i=0;i<tokens.length;i++){
       const t=scAgentResolve(tokens[i]);
+      if(t&&t.ambiguous)return {txn:null,byRef:true,ambiguous:t.ambiguous,token:tokens[i]};
       if(t)return scAgentCanSee(t)?{txn:t,byRef:true,token:tokens[i]}
                                   :{txn:null,byRef:true,denied:t,token:tokens[i]};
     }
+    /* A quoted reference that resolves to nothing may still be a production order or project —
+       many transactions share one, so it names a set rather than a record. */
+    const norm=scAgentNorm(tokens[0]);
+    const ctx=scState.txns.filter(function(x){return scAgentContextNos(x).indexOf(norm)>-1&&scAgentCanSee(x);});
+    if(ctx.length)return {txn:null,byRef:true,context:ctx,token:tokens[0]};
     return {txn:null,byRef:true,token:tokens[0]};
   }
   /* A standalone run of digits, tried only when no full reference was given — "status of 00151".
@@ -129,6 +209,9 @@ function scAgentSubject(q){
   const bare=String(q||'').match(/\b\d{4,8}\b/g);
   if(bare)for(let i=0;i<bare.length;i++){
     const t=scAgentResolve(bare[i]);
+    // The ambiguity marker is not a transaction. Unhandled here it was returned AS the subject
+    // and the answer then dereferenced `.scr` on it and threw.
+    if(t&&t.ambiguous)return {txn:null,byRef:true,ambiguous:t.ambiguous,token:bare[i]};
     if(t)return scAgentCanSee(t)?{txn:t,byRef:true,token:bare[i]}
                                 :{txn:null,byRef:true,denied:t,token:bare[i]};
   }
@@ -295,9 +378,17 @@ function scAgentPortfolio(q){
 function scAgentAnswerAskDeal(q){
   const c=scAgentCtx();
   const sub=scAgentSubject(q);
-  if(sub.denied)return 'I cannot open **'+(sub.denied.no||sub.token)+'** for you — it belongs to '
-    +((scVendor(sub.denied.scr.vendor)||{}).name||'another vendor')
-    +', and a vendor login only sees its own purchase orders.';
+  /* No number, no vendor name. Naming the holder confirmed the reference was live and identified
+     the competitor holding it — and since SCR numbers are sequential, the whole board's vendor
+     allocation could be enumerated one question at a time. */
+  if(sub.denied)return 'I cannot open that reference — a vendor login only sees its own purchase orders.';
+  if(sub.ambiguous)return '**'+sub.token+'** matches more than one transaction:\n\n'
+    +sub.ambiguous.slice(0,6).map(scAgentLine).join('\n')
+    +'\n\nQuote the full reference and I will answer about that one.';
+  if(sub.context)return '**'+sub.token+'** is a production order, not a sub-contracting reference. '
+    +'**'+sub.context.length+'** transaction'+(sub.context.length===1?' is':'s are')+' raised against it:\n\n'
+    +sub.context.slice(0,8).map(scAgentLine).join('\n')
+    +'\n\nName one of those and I will tell you where it stands.';
   if(sub.byRef&&!sub.txn)return 'I cannot find **'+sub.token+'**. I match on any reference a transaction carries — '
     +'SCR, PO, shipment, outbound key, delivery note, challan, gate pass, ASN, IMR or BOM. Check the number and ask again.';
 
@@ -316,11 +407,22 @@ function scAgentAnswerAskDeal(q){
 
   // ---- where is the material
   if(scAgentMatch(q,['material','where','stock','inventory','reserved','position','warehouse'])){
-    const held=(t.reservations||[]).filter(function(r){return Number(r.qty||0)>0;});
+    /* A reservation only HOLDS stock while the material is still in the plant. The engine is
+       explicit — SC_HOLDING_POSITIONS is ['Reserved','Staging'], and scHolds skips anything past
+       that. Listing the lines regardless told a Stores user that 720 PLATE-001 were held at
+       RM-WH/A1-01 on a transaction whose material was already At Vendor, while the availability
+       engine counted that same bin as free. The copilot must not contradict the stock figures. */
+    const holding=(typeof SC_HOLDING_POSITIONS!=='undefined'?SC_HOLDING_POSITIONS:['Reserved','Staging'])
+      .indexOf(t.position||'Main')>-1;
+    const held=holding?(t.reservations||[]).filter(function(r){return Number(r.qty||0)>0;}):[];
+    const outAtVendor=(!holding&&t.position==='At Vendor')
+      ?(t.reservations||[]).filter(function(r){return Number(r.qty||0)>0;}):[];
     let a='Material on **'+(t.no||'this SCR')+'** is at **'+(t.position||'Main')+'**';
     a+=t.positionAt?' since '+t.positionAt+'.':'.';
     if(held.length)a+='\n\nStill reserved against this shipment:\n'+held.map(function(r){
       return '· '+r.qty+' x **'+r.item+'** at '+r.warehouse+' / '+r.location+(r.consumed?'  ('+r.consumed+' already consumed)':'');}).join('\n');
+    else if(outAtVendor.length)a+='\n\nOut with the vendor, pending reconciliation — no longer held against plant stock:\n'
+      +outAtVendor.map(function(r){return '· '+r.qty+' x **'+r.item+'** (issued from '+r.warehouse+' / '+r.location+')';}).join('\n');
     else if((t.reservations||[]).length)a+='\n\nThe reservation is fully consumed — nothing is held in the plant for this transaction any more.';
     if((t.receipts||[]).length)a+='\n\nReceived back:\n'+(t.receipts||[]).map(function(r){
       return '· '+r.qty+' x **'+r.item+'** booked into '+r.warehouse+(r.location?' / '+r.location:'')+' on '+r.at;}).join('\n');
@@ -329,9 +431,15 @@ function scAgentAnswerAskDeal(q){
     return a;
   }
   // ---- what is blocking
-  if(scAgentMatch(q,['block','stuck','delay','late','why','hold','wrong','problem','issue','overdue'])){
+  // 'late' dropped (matched PLATE-001) and 'issue' dropped ("issue quantity", "issue item" and
+  // "goods issue" are all core vocabulary here, none of them asking what is blocked).
+  if(scAgentMatch(q,['block','blocked','blocking','stuck','delay','delayed','why','held up','wrong','problem','overdue'])){
     const gate=scAgentGate(t);
     const mc=typeof scMakerCheckerBlocked==='function'?scMakerCheckerBlocked(t):'';
+    /* Rejected is not closed. scAgentRejected exists precisely for this and was used in the
+       recon agent and the follow-ups but not here, so a transaction rejected at approval —
+       nothing ordered, nothing issued — was reported as "closed", which reads as completed. */
+    if(scAgentRejected(t))return scAgentRejectedLine(t);
     if(t.closed)return 'Nothing is blocking it — **'+(t.no||'this transaction')+'** is closed ('+t.status+')'
       +(t.closedBy?', closed by '+scActorLabel(t.closedBy)+' on '+t.closedAt+'.':'.');
     let a='**'+(t.no||'This transaction')+'** is at step **'+t.step+' — '+scStep(t.step).name+'**, waiting on **'
@@ -344,6 +452,7 @@ function scAgentAnswerAskDeal(q){
   }
   // ---- what happens next
   if(scAgentMatch(q,['next','after','then','forward','following','upcoming'])){
+    if(scAgentRejected(t))return scAgentRejectedLine(t);
     if(t.closed)return 'Nothing further — this transaction is closed. Its record stays available for audit.';
     const nxt=typeof scNextStep==='function'?scNextStep(t,t.step):0;
     let a='Right now: **step '+t.step+' — '+scStep(t.step).name+'**, with '+scActorLabel(t.pendingWith)+'.';
@@ -367,8 +476,14 @@ function scAgentAnswerAskDeal(q){
       +'\n\nAnything not listed has not been raised yet.';
   }
   // ---- who acted
-  if(scAgentMatch(q,['who','history','log','acted','trail','audit','touched','approved by'])){
-    const acts=(t.activity||[]).slice(-8).reverse();
+  // 'log' became 'activity log' — bare 'log' matched "logistics".
+  if(scAgentMatch(q,['who','history','activity log','acted','trail','audit','touched','approved by'])){
+    /* Sorted, not trusted. scSeed pushes "SCR Created" AFTER walking the record forward, so the
+       array is not chronological and slice(-8).reverse() presented the oldest entry as the most
+       recent. Every row carries `iso`. */
+    const acts=(t.activity||[]).slice()
+      .sort(function(a,b){return String(a.iso||'').localeCompare(String(b.iso||''));})
+      .slice(-8).reverse();
     if(!acts.length)return 'No activity recorded on this transaction yet.';
     return 'Most recent activity on **'+(t.no||'this transaction')+'**:\n\n'
       +acts.map(function(a){
@@ -448,8 +563,20 @@ function scAgentAnswerRecon(q){
 
   const r=scAgentRecon(t);
   const gate=scAgentGate(t);
+  /* JUDGED ON THE NUMBERS AND THE STEP — not on scGateBlock, which only evaluates the FR17.7
+     conditions at step 17 and returns "" everywhere else. Reading that empty string as "clear"
+     had the copilot tell a Stores user at step 16 that "nothing is blocking closure, pending
+     receivable is nil and all issue material is accounted for" while 500 were pending and 1080
+     outstanding. I had already found this exact trap in the board listing and fixed it there;
+     the single-transaction branch never got the same treatment. */
+  const figuresClear=Number(r.pending||0)===0&&Number(r.outstanding||0)===0
+    &&!r.scrapMissingReason&&!r.returnMissingReason&&!r.returnMissingLocation;
+  // Where the transaction actually stands, in one phrase, for the verdict lines below.
+  const stage=t.closed?'closed':(t.step<16?'pre-receipt':(t.step===16?'awaiting-imr':(t.step===17?'at-recon':'awaiting-closure')));
 
-  if(scAgentMatch(q,['how','calculat','formula','ratio','consumption','bom','maths','math'])){
+  // 'calculat' is a stem, so it needs prefix matching; 'how' is now word-bounded and no longer
+  // fires on "show me the reconciliation".
+  if(scAgentMatch(q,['how','formula','ratio','consumption','bom','maths','math'])||scAgentStem(q,['calculat'])){
     const lines=(t.scr.issueItems||[]).map(function(x){
       const ratio=Number(x.ratio||0),used=+(Number(r.received||0)*ratio).toFixed(3);
       return '· **'+x.item+'** — BOM ratio '+ratio+', so '+r.received+' x '+ratio+' = **'+used+'** consumed of '+x.qty+' issued';});
@@ -463,7 +590,17 @@ function scAgentAnswerRecon(q){
     if(t.closed)return '**'+(t.no||'This transaction')+'** is already closed'
       +(t.closedBy?' — '+scActorLabel(t.closedBy)+' closed it on '+t.closedAt:'')+'. '
       +'At closure the SCR, PO, Shipment and Challan all moved to Closed; the Delivery Note stayed Approved, the ASN QC Cleared and the IMR Confirmed — FR18.3 deliberately leaves those three alone.';
-    if(!gate)return 'Nothing is blocking closure. Pending receivable is nil and all issue material is accounted for, so **Confirm Full Receipt** is available to '+scActorLabel(t.pendingWith)+'.';
+    if(stage==='awaiting-closure')
+      return 'Full receipt is already confirmed on **'+(t.no||'this transaction')+'**. What remains is the final closure itself, with **'
+        +scActorLabel(t.pendingWith)+'** — that is what closes the SCR, PO, Shipment and Challan (FR18.3).';
+    if(stage==='awaiting-imr')
+      return 'Closure is a long way off — **'+(t.no||'this transaction')+'** is at step 16, waiting on **'
+        +scActorLabel(t.pendingWith)+'** to confirm the material receipt (IMR). Reconciliation only opens once that is done.\n\n'
+        +'As it stands: **'+r.received+'** of '+r.expected+' received, **'+r.pending+'** pending, **'+r.outstanding+'** issue material outstanding.';
+    if(stage==='pre-receipt')
+      return 'Nothing to close yet — **'+(t.no||'this transaction')+'** is at step '+t.step+' ('+scStep(t.step).short+'), well before the material has come back.';
+    if(figuresClear&&!gate)
+      return 'Nothing is blocking closure. Pending receivable is nil and all issue material is accounted for, so **Confirm Full Receipt** is available to '+scActorLabel(t.pendingWith)+'.';
     let a='**Closure is blocked.** '+gate+'\n\nFR17.7 requires all of these before full receipt can be confirmed:\n\n'
       +'· Pending receivable = 0 — currently **'+r.pending+'**'+(r.pending?'  NOT MET':'  met')+'\n'
       +'· Outstanding issue qty = 0 — currently **'+r.outstanding+'**'+(r.outstanding?'  NOT MET':'  met')+'\n'
@@ -487,8 +624,19 @@ function scAgentAnswerRecon(q){
     +'\n· Pending — **'+r.pending+'**\n\n'
     +'**Issue side**\n· Issued to vendor — '+r.issued+'\n· Consumed against BOM — '+r.consumed
     +'\n· Returned unused — '+r.returned+'\n· Scrap / process loss — '+r.scrap+'\n· Outstanding — **'+r.outstanding+'**\n\n';
+  /* The verdict has to match the stage, not just the gate. "Everything reconciles. Full receipt
+     can be confirmed." was printed under figures reading 500 pending and 1080 outstanding, and
+     again on transactions that had already closed. */
   a+=gate?('**Blocked:** '+gate+'\n\nAsk me *why can I not close this* and I will list every FR17.7 condition against its current value.')
-        :'Everything reconciles. Full receipt can be confirmed.';
+    :(stage==='closed'
+        ?'This transaction is closed'+(t.closedBy?' — '+scActorLabel(t.closedBy)+' closed it on '+t.closedAt:'')+'. The figures above are its final position.'
+      :stage==='awaiting-closure'
+        ?'Full receipt is confirmed. What remains is final closure by '+scActorLabel(t.pendingWith)+'.'
+      :stage==='awaiting-imr'
+        ?'Not reconciled yet — the material receipt has still to be confirmed by '+scActorLabel(t.pendingWith)+' at step 16.'
+      :figuresClear
+        ?'Everything reconciles. Full receipt can be confirmed.'
+        :'Not yet reconciled — '+r.pending+' pending and '+r.outstanding+' issue material outstanding.');
   return a;
 }
 

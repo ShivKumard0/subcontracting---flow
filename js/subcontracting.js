@@ -1272,7 +1272,12 @@ function scSeed(){
   const mk=function(step,over){
     const n=scNextNo('scr');
     const t={
-      id:'TXN-'+(scState.txns.length+1),no:n,step:1,status:'Created',closed:false,
+      /* __v STAMPED AT BIRTH. scNormalise runs a one-shot migration for records that predate the
+         step 7/8 swap, keyed on a missing __v — and the seed was minting records without it, so
+         the FIRST reload after seeding treated all thirty as legacy and swapped goods issue with
+         logistics. SUB-2026-00009 came back at step 8 still pending with Stores, and the whole
+         board quietly rearranged itself the moment anyone refreshed. */
+      id:'TXN-'+(scState.txns.length+1),no:n,step:1,status:'Created',closed:false,__v:2,
       createdAt:scNow(),createdIso:new Date().toISOString(),createdBy:'planner',
       pendingWith:'planner',pendingSince:new Date(Date.now()-(3+scState.txns.length*7)*3600000).toISOString(),
       participants:['planner'],activity:[],
@@ -1292,10 +1297,17 @@ function scSeed(){
        been sitting, which is what makes some records read as overdue and gives the board a
        believable spread rather than thirty rows all created in the same minute. */
     if(over.scrOver){Object.assign(t.scr,over.scrOver);delete over.scrOver;}
-    if(over.age!==undefined){t.pendingSince=new Date(Date.now()-over.age*3600000).toISOString();
+    const aged=over.age!==undefined;
+    if(aged){t.pendingSince=new Date(Date.now()-over.age*3600000).toISOString();
       t.createdAt=scNow();delete over.age;}
     const close=over.close,reject=over.reject;delete over.close;delete over.reject;
     Object.assign(t,over);
+    /* Logged BEFORE the walk, because it happened before the walk. Pushing it afterwards left
+       the array out of chronological order, and the seed runs fast enough that the timestamps
+       collide — so sorting could not rescue it either, and "most recent activity" led with the
+       SCR's creation. */
+    t.activity.push({at:t.createdAt,iso:t.createdIso,action:'SCR Created',from:'',to:'Created',
+      byId:'planner',by:'Planner',role:'Planner',source:'Web Portal',reasonSet:'',reason:'',remarks:''});
     // Walk it forward to its seeded step so pendingWith and participants are consistent.
     /* The seed WALKS the transaction rather than teleporting it: each step applies its document
        stamps, mints its document number and moves the material, exactly as a real run would.
@@ -1359,10 +1371,10 @@ function scSeed(){
           // Mirror what a real confirmation does, so a seeded reconciliation has stock behind it.
           scReceiveMaterial(t,Number(t.scr.recvQty||0));}
       }
-      if(over.age===undefined)t.pendingSince=new Date(Date.now()-(2+step)*3600000).toISOString();
+      // `age` was deleted from `over` above, so testing it here was always true and the seeded
+      // ageing was overwritten with (2+step) hours on every record past step 1.
+      if(!aged)t.pendingSince=new Date(Date.now()-(2+step)*3600000).toISOString();
     }
-    t.activity.push({at:t.createdAt,iso:t.createdIso,action:'SCR Created',from:'',to:'Created',
-      byId:'planner',by:'Planner',source:'Web Portal',reasonSet:'',reason:'',remarks:''});
     /* Terminal records, so the board has history and not only work in progress. A rejected SCR
        and a closed transaction are the two things a person most often looks up after the fact,
        and until now neither existed to look up. */
@@ -1447,7 +1459,7 @@ function scStartNew(){
      scTxn returns the FIRST match, so a collision made one transaction permanently unreachable
      while both rows rendered and both opened the same record. */
   scState.seq.txn=Math.max(scState.seq.txn||0,scState.txns.length)+1;
-  const t={id:'TXN-'+scState.seq.txn,no:'',step:1,status:'Created',closed:false,
+  const t={id:'TXN-'+scState.seq.txn,no:'',step:1,status:'Created',closed:false,__v:2,
     createdAt:scNow(),createdIso:new Date().toISOString(),createdBy:activePersonaId,
     pendingWith:'planner',pendingSince:new Date().toISOString(),participants:[activePersonaId],activity:[],
     scr:{base:'Production Order',unpeg:'No',interUnit:'No',fim:'No',billable:'Yes',logistics:'Yes',issueItems:[]},
