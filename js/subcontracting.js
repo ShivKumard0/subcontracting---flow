@@ -2918,15 +2918,26 @@ function scPanel6(txn){
   /* FR7.4 — "After generation: View Outbound Key shall be enabled on the Shipment page. On click,
      the complete Outbound Key shall open in read-only mode." Before generation the button says so
      rather than disappearing, so the Planner knows what Submit will produce. */
+  /* FR7.4 — "After generation: View Outbound Key shall be ENABLED on the Shipment page." Enabled,
+     not created: the control belongs on the page throughout and changes state, which is also how
+     the wireframe draws it. Hiding it until the key existed meant the Planner never saw it at
+     all — the key is minted by Submit Shipment, and submitting hands the transaction to Stores,
+     so step 6 is only ever visited BEFORE the key exists. A disabled button that says why is
+     honest and discoverable; an absent one just looks missing. */
+  const hasKey=!!txn.shipment.outboundKey;
   const okBtn='<div class="sc-sec"><div class="sc-sec-h">Outbound Key</div><div class="sc-kv-grid">'
     +scRow('Outbound Key No.',scEsc(txn.shipment.outboundKey||'Not generated'))
     +scRow('Transfer Order No.',scEsc(txn.shipment.transferOrder||'Not generated'))
     +'</div>'
-    +(txn.shipment.outboundKey
-      ? '<button class="btn btn-secondary btn-sm" style="margin-top:10px" onclick="scOpenDoc(\'outbound\')">View Outbound Key</button>'
-      : '<div class="sc-help" style="margin-top:8px">Generated together with the Transfer Order when you submit the shipment. '
-        +'It is the pick list Stores works from, and it must accompany the material at the gate.</div>')
-    +'</div>';
+    +'<button class="btn btn-secondary btn-sm'+(hasKey?'':' sc-btn-off')+'" style="margin-top:10px"'
+      +(hasKey?' onclick="scOpenDoc(\'outbound\')"'
+              :' disabled title="Generated when you submit the shipment"')
+      +'>View Outbound Key</button>'
+    +'<div class="sc-help" style="margin-top:8px">'
+      +(hasKey
+        ? 'The pick list Stores works from. It must accompany the material at the security gate, and quantities cannot be changed once it is generated.'
+        : 'Generated together with the Transfer Order when you submit the shipment. It becomes the pick list Stores works from and travels with the material to the gate.')
+    +'</div></div>';
   return okBtn
     +'<div class="sc-sec"><div class="sc-sec-h">Issue Items &amp; Availability</div>'
     +scPanelTable(['#','Issue Item','Shipment Qty','UOM','Warehouse','Storage Loc.','Available','Check','WIP Adj. Ref.'],rows,960)
@@ -3407,6 +3418,7 @@ function scInjectCss(){
 .sc-row-new{box-shadow:inset 3px 0 0 #6d5bd0}
 .sc-store-warn{background:#fef3c7;border:1px solid #fcd34d;color:#78350f;border-radius:8px;padding:11px 14px;font-size:12.5px;line-height:1.55;margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 /* -- PRINTED DOCUMENT SLIDE-OVER -- */
+.sc-btn-off{opacity:.45;cursor:not-allowed;pointer-events:none}
 .sc-doc-view{border:1px solid var(--border);background:var(--card);border-radius:6px;padding:4px 11px;font-size:11.5px;font-weight:600;color:var(--navy);cursor:pointer;font-family:inherit;transition:border-color .15s,background .15s}
 .sc-doc-view:hover{border-color:var(--navy);background:var(--ol)}
 .sc-doc-back{position:fixed;inset:0;background:rgba(15,23,42,.32);z-index:940;animation:fadeIn .18s ease}
