@@ -135,12 +135,26 @@ function scAgentSubject(q){
   return {txn:scAgentCtx().txn,byRef:false};
 }
 // Portfolio questions are about the set, not about one record.
+/* These only decide anything when a transaction is ALREADY OPEN — with nothing on screen every
+   question falls to the board anyway. So the bar is high: a word earns a place here only if it
+   means "the set" even while the user is looking at one record. 'show me', 'total', 'history',
+   'open' and 'overdue' did not clear that bar — "show me the documents", "what is the total
+   value", "show me the history" and "is this overdue" are all about the record in front of you,
+   and listing them here answered about all thirty instead. */
 function scAgentIsPortfolio(q){
-  return scAgentMatch(q,['all ','list','how many','everything','portfolio','overdue','which ','anything',
-    'open ','pending with','queue','summary of','across','total','count','stuck','waiting',
-    // The terminal-state words too: "show me closed transactions" is a board question, and
-    // without these it tripped the ambiguity check and got asked "which one?" back.
-    'closed','rejected','finished','completed','history','show me','board']);
+  return scAgentMatch(q,['all ','list','how many','everything','portfolio','which ','anything',
+    'pending with','queue','across','count','board','each ','every ',
+    // Terminal-state listings: "show me closed transactions" is a board question either way.
+    'closed transaction','rejected transaction','closed or rejected']);
+}
+/* A DEMONSTRATIVE PINS THE QUESTION TO WHAT IS ON SCREEN. The portfolio keywords had grown to
+   include 'show me', 'overdue', 'waiting', 'history', 'total' — so standing on a transaction and
+   typing "is this overdue?", "show me the documents", "who is it waiting on" or "what is the
+   total value" answered about all thirty instead, and the thinking line said "Reading the board"
+   so it looked entirely deliberate. Chips hid it, because a chip carries the reference; it only
+   bit when someone typed, which is exactly what happens when the keyboard is handed over. */
+function scAgentIsThisOne(q){
+  return scAgentMatch(q,['this','these','here',' it ',' its ','current','on screen','open one']);
 }
 /* "What is the status of the SCR?" names no SCR. Answering it with the whole board buries the
    one record the person means, and answering it about whatever happens to be on screen answers
@@ -289,8 +303,9 @@ function scAgentAnswerAskDeal(q){
 
   // Nothing named, nothing open, and the question is about "an SCR" — ask which one.
   if(!sub.byRef&&!sub.txn&&scAgentIsAmbiguous(q))return scAgentRangePrompt();
-  // A reference always wins; otherwise a portfolio-shaped question is about the whole board.
-  if(!sub.byRef&&(!sub.txn||scAgentIsPortfolio(q)))return scAgentPortfolio(q);
+  /* A reference always wins. Otherwise a portfolio-shaped question is about the board — unless
+     it points at what is on screen, which a demonstrative does. */
+  if(!sub.byRef&&(!sub.txn||(scAgentIsPortfolio(q)&&!scAgentIsThisOne(q))))return scAgentPortfolio(q);
 
   const t=sub.txn;
   if(!t)return scAgentPortfolio(q);
@@ -542,7 +557,9 @@ function scAgentHTML(){
       +'<div class="sca-head-l"><div class="sca-av sca-av-lg">'+a.initials+'</div>'
         +'<div><div class="sca-title">'+a.name+' <span class="sca-live"></span></div>'
         +'<div class="sca-ctx" id="sca-ctx">'+scAgentCtxLabel()+'</div></div></div>'
-      +'<button class="sca-x" onclick="scAgentToggle()" aria-label="Close">&times;</button>'
+      +'<div class="sca-head-r">'
+      +(thread.length?'<button class="sca-newchat" onclick="scAgentReset()" title="Start a new conversation">New chat</button>':'')
+      +'<button class="sca-x" onclick="scAgentToggle()" aria-label="Close">&times;</button></div>'
     +'</div>'
     +'<div class="sca-tabs">'+SC_AGENTS.map(function(x){
         return '<button class="sca-tab'+(x.id===scAgentState.agent?' on':'')+'" onclick="scAgentSwitch(\''+x.id+'\')">'+x.name+'</button>';
@@ -556,10 +573,13 @@ function scAgentHTML(){
       :'<div class="sca-chips">'+a.prompts.slice(0,5).map(function(p){
         return '<button class="sca-chip" onclick="scAgentAsk(this.dataset.q)" data-q="'+p.replace(/"/g,'&quot;')+'">'+p+'</button>';
       }).join('')+'</div>')
+    // Visibly inert while busy, rather than silently ignoring what is typed into it.
     +'<div class="sca-input">'
-      +'<input id="sca-q" placeholder="Ask about any transaction, or quote a reference…" autocomplete="off" '
+      +'<input id="sca-q" placeholder="'+(scAgentState.busy?'Answering…':'Ask about any transaction, or quote a reference…')+'" autocomplete="off" '
+        +(scAgentState.busy?'disabled ':'')
         +'onkeydown="if(event.key===\'Enter\'){event.preventDefault();scAgentSendInput();}">'
-      +'<button class="sca-send" onclick="scAgentSendInput()" aria-label="Send">'
+      +'<button class="sca-send'+(scAgentState.busy?' sca-send-off':'')+'"'+(scAgentState.busy?' disabled':'')
+        +' onclick="scAgentSendInput()" aria-label="Send">'
         +'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>'
       +'</button>'
     +'</div>'
@@ -632,10 +652,31 @@ function scAgentToggle(){
     scAgentState.busy=false;
   }
 }
-function scAgentSwitch(id){scAgentState.agent=id;scAgentRender();}
+function scAgentSwitch(id){
+  if(id===scAgentState.agent)return;
+  /* Finish the OUTGOING thread's stream before leaving it. Closing the panel already did this;
+     switching tabs did not, so the half-typed message kept streaming:true and a partial `shown`.
+     Switching back rendered truncated text under a caret that could never advance, with the
+     follow-up chips sitting beneath it because `busy` had since cleared. */
+  scAgentStopStream();
+  scAgentThread().forEach(function(m){if(m.streaming){m.shown=m.text.length;m.streaming=false;}});
+  scAgentState.busy=false;
+  scAgentState.agent=id;
+  scAgentRender();
+}
+// Start a fresh conversation — the panel otherwise restores the old transcript on reopen, so the
+// empty state and its starter prompts were reachable only once per page load.
+function scAgentReset(){
+  scAgentStopStream();
+  scAgentState.threads={};scAgentState.busy=false;
+  scAgentRender();
+}
 function scAgentSendInput(){
   const i=document.getElementById('sca-q');
   if(!i)return;
+  // Checked BEFORE clearing. It cleared first and then scAgentAsk early-returned on `busy`, so a
+  // question typed while an answer was streaming vanished with no message and no state change.
+  if(scAgentState.busy)return;
   const v=i.value.trim();
   if(!v)return;
   i.value='';
@@ -659,7 +700,8 @@ function scAgentThinkingLabels(q,sub){
      while a transaction happens to be open still resolves a subject, so keying only on that
      produced "Reading SUB-2026-00016" above a reply about all thirty — the routing rule from
      scAgentAnswerAskDeal has to be mirrored here or the two disagree. */
-  const board=sub&&!sub.byRef&&(!sub.txn||scAgentIsPortfolio(q));
+  // Same rule as the router above — if these two disagree the label lies about the answer.
+  const board=sub&&!sub.byRef&&(!sub.txn||(scAgentIsPortfolio(q)&&!scAgentIsThisOne(q)));
   const t=board?null:(sub&&sub.txn),who=t?(t.no||'this transaction'):null;
   if(sub&&sub.byRef&&!t)return ['Searching every reference','Checking the document numbers'];
   if(scAgentState.agent==='recon')
@@ -713,9 +755,12 @@ function scAgentAsk(q){
       }
       const el=document.getElementById('sca-stream');
       if(el){
-        el.innerHTML=scAgentMd(scAgentPartial(answer,msg.shown))+'<span class="sca-caret"></span>';
         const b=document.getElementById('sca-body');
-        if(b)b.scrollTop=b.scrollHeight;
+        // Only follow the text if the reader is already at the bottom. Pinning unconditionally
+        // made it impossible to scroll up and re-read the start of a long answer while it typed.
+        const atBottom=!b||(b.scrollHeight-b.scrollTop-b.clientHeight)<48;
+        el.innerHTML=scAgentMd(scAgentPartial(answer,msg.shown))+'<span class="sca-caret"></span>';
+        if(b&&atBottom)b.scrollTop=b.scrollHeight;
       }else{scAgentStopStream();scAgentState.busy=false;scAgentRender();}
     },16);
   },520+Math.min(900,q.length*10));
@@ -736,7 +781,9 @@ function scAgentMount(){
 '  border:0;background:var(--navy,#0f172a);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;',
 '  box-shadow:0 6px 20px rgba(15,23,42,.28);transition:transform .18s,box-shadow .18s,opacity .15s;font-family:Inter,sans-serif}',
 '#sc-agent-fab:hover{transform:translateY(-2px);box-shadow:0 10px 26px rgba(15,23,42,.34)}',
-'#sc-agent-fab.hidden{opacity:0;pointer-events:none;transform:scale(.85)}',
+// visibility, not just opacity — an opacity-0 button is still in the tab order, so a keyboard
+// user could land on a control they cannot see.
+'#sc-agent-fab.hidden{opacity:0;pointer-events:none;visibility:hidden;transform:scale(.85)}',
 '#sc-agent-fab .sca-dot{position:absolute;top:9px;right:9px;width:8px;height:8px;border-radius:50%;background:#22c55e;border:2px solid var(--navy,#0f172a)}',
 /* The scrim blurs the page BEHIND it rather than blurring the app's own DOM: backdrop-filter
    leaves the layout untouched, so nothing reflows and the panel above it stays perfectly sharp.
@@ -759,6 +806,10 @@ function scAgentMount(){
 '.sca-title{font-size:14px;font-weight:700;line-height:1.2;display:flex;align-items:center;gap:6px}',
 '.sca-live{width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 2.5px rgba(34,197,94,.18);flex-shrink:0}',
 '.sca-ctx{font-size:11.5px;color:var(--gray,#6a7282);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:270px}',
+'.sca-head-r{display:flex;align-items:center;gap:4px;flex-shrink:0}',
+'.sca-newchat{border:1px solid var(--border,#e5e7eb);background:var(--card,#fff);border-radius:14px;padding:4px 10px;',
+'  font-size:10.5px;font-weight:600;color:var(--gray,#6a7282);cursor:pointer;font-family:inherit;white-space:nowrap}',
+'.sca-newchat:hover{border-color:var(--navy,#0f172a);color:var(--navy,#0f172a)}',
 '.sca-x{border:0;background:transparent;font-size:24px;line-height:1;color:var(--gray,#6a7282);cursor:pointer;padding:0 4px;border-radius:6px}',
 '.sca-x:hover{background:var(--ol,#f1f5f9);color:var(--navy,#0f172a)}',
 '.sca-tabs{display:flex;gap:6px;padding:10px 16px;border-bottom:1px solid var(--border,#e5e7eb);flex-shrink:0}',
@@ -774,7 +825,12 @@ function scAgentMount(){
 '.sca-tab:hover{border-color:#cbd5e1;color:var(--navy,#0f172a)}',
 '.sca-tab.on{background:var(--navy,#0f172a);border-color:var(--navy,#0f172a);color:#fff}',
 '.sca-body{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:16px;background:var(--light,#f8f9fb)}',
-'.sca-row{display:flex;gap:9px;align-items:flex-start;animation:fadeUp .22s ease}',
+/* Only the NEWEST row animates in. Every render replaces the whole DOM, so an unscoped rule
+   replayed fadeUp on every message three times per question and the panel visibly wobbled. */
+'.sca-row{display:flex;gap:9px;align-items:flex-start}',
+'.sca-row:last-child{animation:fadeUp .22s ease}',
+'.sca-send-off{opacity:.4;cursor:not-allowed}',
+'.sca-input input:disabled{background:var(--ol,#f1f5f9);color:var(--gray,#6a7282);cursor:not-allowed}',
 '.sca-row-me{justify-content:flex-end}',
 '.sca-bubble-wrap{max-width:88%;min-width:0}',
 '.sca-bubble{max-width:82%;padding:11px 13px;border-radius:14px;font-size:12.5px;line-height:1.68;word-break:break-word}',
@@ -826,7 +882,16 @@ function scAgentMount(){
 '  display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:opacity .15s}',
 '.sca-send:hover{opacity:.86}',
 '.sca-foot{padding:0 16px 11px;font-size:10px;line-height:1.4;color:var(--gray,#6a7282);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-'@media (max-width:520px){#sc-agent-panel{width:100vw}}'
+'@media (max-width:520px){#sc-agent-panel{width:100vw}}',
+/* The host app honours this in three places; the copilot was the one surface that did not, and
+   it runs five infinite animations. The shimmer needs a solid colour when it stops moving, or
+   the label would be transparent text over a static gradient. */
+'@media (prefers-reduced-motion:reduce){',
+'  .sca-row:last-child,.sca-think i,.sca-caret,.sca-av-live:after,#sc-agent-panel,#sc-agent-scrim{animation:none!important;transition:none!important}',
+'  .sca-think span{animation:none!important;background:none;-webkit-background-clip:border-box;background-clip:border-box;color:var(--navy,#0f172a)}',
+'}',
+// Forced-colors: transparent text over a gradient disappears entirely in High Contrast.
+'@media (forced-colors:active){.sca-think span{background:none;color:CanvasText;-webkit-background-clip:border-box;background-clip:border-box}}'
 ].join('\n');
   document.head.appendChild(css);
 
@@ -848,6 +913,10 @@ function scAgentMount(){
 
   const panel=document.createElement('div');
   panel.id='sc-agent-panel';
+  // It behaves as a modal — scrim, click-outside, Escape — so it should say so.
+  panel.setAttribute('role','dialog');
+  panel.setAttribute('aria-modal','true');
+  panel.setAttribute('aria-label','Sub-Contracting copilot');
   document.body.appendChild(panel);
   scAgentRender();
 }
