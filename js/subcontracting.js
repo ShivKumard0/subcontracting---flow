@@ -143,6 +143,13 @@ const SC_STEPS=[
   {no:18,name:'Final Closure of Sub-Contracting Transaction',   short:'Closure',           actors:['finance'],              phase:'inbound',     doc:'recon'}
 ];
 function scStep(no){return SC_STEPS.find(function(s){return s.no===no;})||SC_STEPS[0];}
+/* THE STEPS A PERSON SEES. Step 3 is run by the system on SCR approval (FR2.5) — it has no
+   actor, no screen and no action, so presenting it as a stop on the journey invited the reader
+   to look for the click that isn't there. The FRD's numbering is kept intact everywhere (the
+   step number IS the FR number, and the dashboards, the copilot and the log all quote it); this
+   only governs what is DRAWN. */
+const SC_SHOWN_STEPS=SC_STEPS.filter(function(s){return !s.system;});
+function scShownCount(){return SC_SHOWN_STEPS.length;}
 function scActor(id){return SC_ACTORS.find(function(a){return a.id===id;})||null;}
 function scActorLabel(id){const a=scActor(id);return a?a.label:(id||'—');}
 // -- "Pending with" is rendered as role + person, matching the mobile listing ("Buyer – R. Nair")
@@ -2042,7 +2049,7 @@ function scChip(text,tone){return '<span class="sc-chip sc-'+(tone||'grey')+'">'
 function buildScTilesHTML(){
   const me=activePersonaId;
   return '<div class="sc-tiles-wrap"><div class="sc-tiles">'
-    +SC_STEPS.map(function(st){
+    +SC_SHOWN_STEPS.map(function(st){
       const mine=scActorOwnsStep(me,st.no);
       const count=scMyAtStep(me,st.no).length;
       const actionable=mine?scActionable(me).filter(function(t){return t.step===st.no;}).length:0;
@@ -3217,13 +3224,17 @@ function buildScTxnHTML(){
   const head='<div class="sc-txn-head">'
     +'<button class="ep-cancel-btn" onclick="scBackToDash()">‹ Dashboard</button>'
     +'<div class="sc-txn-title"><p class="sc-h1">'+scEsc(spec.title)+'</p>'
-      +'<p class="sc-h2">'+scEsc(txn.no||'New request')+' · Step '+st.no+' of 18 · '+scEsc(st.name)+'</p></div>'
+      /* "of 18" with seventeen dots below it invites the reader to hunt for the missing one.
+         The step keeps its FRD number — which is what every other surface quotes — and the total
+         is simply not claimed. */
+      +'<p class="sc-h2">'+scEsc(txn.no||'New request')+' · Step '+st.no+' · '+scEsc(st.name)+'</p></div>'
     +'<div class="sc-txn-right">'+scChip(txn.status,scStatusTone(txn.status))
       +(scOverdue(txn)?scChip('Overdue','red'):'')
       +(txn.closed?'':'<span class="sc-pending">Pending with '+scPendingWithHTML(txn.pendingWith)+'</span>')+'</div>'
     +'</div>';
-  // Progress rail — all eighteen, current highlighted, done ticked.
-  const rail='<div class="sc-rail">'+SC_STEPS.map(function(s){
+  // Progress rail — the steps a person acts on, current highlighted, done ticked. The system
+  // step is not drawn: it has no screen to reach and no action to take.
+  const rail='<div class="sc-rail">'+SC_SHOWN_STEPS.map(function(s){
     const cls=s.no<step?'done':s.no===step?'now':'todo';
     return '<span class="sc-rail-dot '+cls+'" title="'+scEsc(s.no+'. '+s.name)+'">'+(s.no<step?'✓':s.no)+'</span>';
   }).join('')+'</div>';

@@ -3804,7 +3804,8 @@ const cfgJourneys=[
      the event names. manualJourneyStepCatalog['sub-contracting'] is the third list that has to
      stay in step — it supplies the actor pill, the SLA and the agent flags. Change one, change
      all three. == */
-  {id:'sub-contracting',name:'Sub-Contracting Journey',category:'P2P',desc:'Runs a sub-contracting transaction end to end — the request and its approval, the commercial PO, the outbound shipment on a delivery challan, the vendor return, and reconciliation to closure.',status:'Active',tags:['18 steps','Planning, Stores, Logistics, Finance'],
+  {id:'sub-contracting',name:'Sub-Contracting Journey',category:'P2P',desc:'Runs a sub-contracting transaction end to end — the request and its approval, the commercial PO, the outbound shipment on a delivery challan, the vendor return, and reconciliation to closure.',// 17 human steps; the eighteenth (FR3, product and BOM processing) is run by the system.
+status:'Active',tags:['17 steps + 1 automated','Planning, Stores, Logistics, Finance'],
     steps:[
       {name:'Create Sub-Contracting Request (SCR)',src:'Planner',type:'rule'},
       {name:'SCR Approval / Return / Reject',src:'PMG Approver',type:'rule'},
