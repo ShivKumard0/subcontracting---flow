@@ -104,7 +104,8 @@ function scAgentMatch(q,words){
   return words.some(function(w){
     const t=String(w).toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
     if(!t)return false;
-    if(t.indexOf(' ')>-1)return s.indexOf(' '+t+' ')>-1;      // a phrase matches literally
+    // A phrase inflects on its LAST word — "closed transaction" has to match "closed transactions".
+    if(t.indexOf(' ')>-1)return forms.some(function(f){return s.indexOf(' '+t+f+' ')>-1;});
     return forms.some(function(f){return s.indexOf(' '+t+f+' ')>-1;});
   });
 }
@@ -243,6 +244,26 @@ function scAgentIsPortfolio(q){
    total value" answered about all thirty instead, and the thinking line said "Reading the board"
    so it looked entirely deliberate. Chips hid it, because a chip carries the reference; it only
    bit when someone typed, which is exactly what happens when the keyboard is handed over. */
+/* Domain NOUNS only. The first version of this list included "what is", "show" and "where",
+   which nearly every question contains — so the guard passed everything and never fired. The
+   test has to be "does this question share vocabulary with sub-contracting", not "is this a
+   question". */
+function scAgentInDomain(q){
+  return scAgentMatch(q,['scr','po','transaction','shipment','challan','delivery','note','asn','imr','bom',
+    'vendor','supplier','material','stock','item','quantity','qty','step','status','document','paperwork',
+    'reconciliation','recon','block','blocked','blocking','overdue','value','price','rate','cost','worth',
+    'approve','approval','reject','return','closed','close','history','log','activity','audit','acted',
+    'warehouse','position','reserved','receipt','issue','gate','pending','waiting','owner','next',
+    'bottleneck','slowest','queue','work','task','board','everything','open','risk','wrong','due']);
+}
+// One wording for "outside what I can answer", used from both routes.
+function scAgentOutOfScope(){
+  return 'I do not have an answer for that one.\n\n'
+    +'I can only read this journey — a transaction\'s status and step, who holds it and for how long, '
+    +'what is blocking it, its material position and documents, its activity log, and the reconciliation '
+    +'arithmetic. Anything outside that I would only be guessing at.\n\n'
+    +'Try *what should I do*, *what is overdue*, *where is the bottleneck*, or name a reference.';
+}
 function scAgentIsThisOne(q){
   return scAgentMatch(q,['this','these','here',' it ',' its ','current','on screen','open one']);
 }
@@ -570,6 +591,10 @@ function scAgentAnswerAskDeal(q){
           +(g?'\n   blocked: '+g:'');}).join('\n')
       +'\n\n'+(actor&&actor.focus?actor.focus:'');
   }
+  /* The same honesty test with NOTHING open. This lived only inside the per-transaction branch,
+     so from the dashboard "tell me a joke" fell through to the board listing and answered
+     confidently — the exact behaviour the fallback exists to prevent. */
+  if(!sub.byRef&&!sub.txn&&!scAgentInDomain(q))return scAgentOutOfScope();
   // Nothing named, nothing open, and the question is about "an SCR" — ask which one.
   if(!sub.byRef&&!sub.txn&&scAgentIsAmbiguous(q))return scAgentRangePrompt();
   /* A reference always wins. Otherwise a portfolio-shaped question is about the board — unless
@@ -699,22 +724,7 @@ function scAgentAnswerAskDeal(q){
      below, so asking something off-topic returned a confident transaction card — the behaviour
      that quietly teaches people not to trust the answers it IS good at. If the question shares no
      vocabulary with this domain at all, it says so instead of guessing. */
-  /* Domain NOUNS only. The first version of this list included "what is", "show" and "where",
-     which nearly every question contains — so the guard passed everything and never fired. The
-     test has to be "does this question share vocabulary with sub-contracting", not "is this a
-     question". */
-  if(!scAgentMatch(q,['scr','po','transaction','shipment','challan','delivery','note','asn','imr','bom',
-      'vendor','supplier','material','stock','item','quantity','qty','step','status','document','paperwork',
-      'reconciliation','recon','block','blocked','blocking','overdue','value','price','rate','cost',
-      'approve','approval','reject','return','closed','close','history','log','activity','audit','acted',
-      'warehouse','position','reserved','receipt','issue','gate','pending','waiting','owner','next'])
-    &&!sub.byRef){
-    return 'I do not have an answer for that one.\n\n'
-      +'I can only read what is on this transaction and the board — status and step, who holds it and for how long, '
-      +'what is blocking it, its material position and documents, its activity log, and the reconciliation arithmetic. '
-      +'Anything outside that I would only be guessing at.\n\n'
-      +'Try *what is blocking this*, *where is the material*, *show me the documents*, or name a reference.';
-  }
+  if(!scAgentInDomain(q)&&!sub.byRef)return scAgentOutOfScope();
   // ---- default: the whole picture
   const r=scAgentRecon(t);
   return 'Here is where **'+(t.no||'this transaction')+'** stands:\n\n'
