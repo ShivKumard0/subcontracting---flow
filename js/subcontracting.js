@@ -86,7 +86,7 @@ const SC_ACTORS=[
      "the Vendor shall only be able to view and act on its own applicable approved POs" had
      nothing to compare against, and an SCR naming any of the three external vendors landed in
      this one queue. The seed's vendor is V-1001, so this persona is that vendor. */
-  {id:'vendor',name:'ABC Fabricators',label:'Vendor',department:'External — Subcontractor',function:'External',initials:'AF',email:'ops@abcfabricators.in',vendorCode:'V-1001',
+  {id:'vendor',name:'ABC Fabricators Pvt Ltd',label:'Vendor',department:'External — Subcontractor',function:'External',initials:'AF',email:'ops@abcfabricators.in',vendorCode:'V-1001',
    focus:'Raises the advance shipping notice for processed material ready to return.',
    journeys:['sub-contracting'],scSteps:[13],approvals:0,owned:1,
    kpis:[['Open POs','2'],['ASNs Raised','1'],['Returned to Me','0'],['Due This Week','1']]}
@@ -252,6 +252,32 @@ function scWarehouse(code){return scMaster.warehouses.find(function(w){return w.
 function scProdOrder(no){return scMaster.productionOrders.find(function(p){return p.no===no;})||null;}
 function scProject(code){return scMaster.projects.find(function(p){return p.code===code;})||null;}
 function scRateContract(no){return scMaster.rateContracts.find(function(r){return r.no===no;})||null;}
+
+/* == ONE VENDOR PERSONA PER VENDOR =========================================================
+   FR13.1 — "The Vendor shall only be able to view and act on its own applicable approved POs."
+   That rule is only satisfiable if there is a login per vendor. There was one Vendor persona
+   against three external vendors in the master, so an SCR naming Larsen or Precision Works
+   routed to ABC Fabricators, who was then correctly refused by the FR13.1 check — and the
+   transaction was stranded at step 13 with nobody able to raise the ASN and no return path.
+
+   Generated from the vendor master rather than hand-written, so adding a vendor to the master
+   cannot leave the journey without someone to act on it. == */
+scMaster.vendors.filter(function(v){return v.type==='External';}).forEach(function(v){
+  if(SC_ACTORS.some(function(a){return a.vendorCode===v.code;}))return;
+  const initials=v.name.replace(/[^A-Za-z ]/g,'').split(/\s+/).filter(Boolean)
+    .slice(0,2).map(function(w){return w.charAt(0);}).join('').toUpperCase();
+  SC_ACTORS.push({id:'vendor-'+v.code.toLowerCase(),name:v.name,label:'Vendor',
+    department:'External — Subcontractor',function:'External',initials:initials||'VN',
+    email:'ops@'+v.code.toLowerCase()+'.example',vendorCode:v.code,
+    focus:'Raises the advance shipping notice for processed material ready to return.',
+    journeys:['sub-contracting'],scSteps:[13],approvals:0,owned:0,
+    kpis:[['Open POs','0'],['ASNs Raised','0'],['Returned to Me','0'],['Due This Week','0']]});
+});
+// Which Vendor login owns a transaction: the one whose vendorCode matches the SCR's vendor.
+function scVendorPersona(code){
+  const a=SC_ACTORS.find(function(x){return x.vendorCode&&x.vendorCode===code;});
+  return a?a.id:'vendor';
+}
 
 /* == REASON CODES ==========================================================================
    The FRD's Reason Codes tab, verbatim. One master, filtered by Reason Set — which is what
@@ -787,6 +813,8 @@ function scAdvance(txn,step,opts){
     txn.dn.issuedBy=typeof activePersonaId!=='undefined'?activePersonaId:'stores';
     scStampDoc(txn,'dn','Generated');
   }
+  // FR13.1 — the ASN belongs to the vendor named on the SCR, not to "the vendor role".
+  if(step===13&&!opts.pendingWith)opts.pendingWith=scVendorPersona(txn.scr.vendor);
   const spec=SC_STEP_SPEC[step]||{};
   txn.step=step;
   txn.pendingWith=opts.pendingWith||scStep(step).actors[0];
@@ -1207,7 +1235,7 @@ function scSeed(){
            that did it here is gone. */
         if(nxt===3){scRunFr3(t);nxt=4;s=3;}
         t.step=nxt;
-        t.pendingWith=scStep(nxt).actors[0];
+        t.pendingWith=nxt===13?scVendorPersona(t.scr.vendor):scStep(nxt).actors[0];
         const sp=scSpec(nxt);
         if(sp.status)t.status=sp.status;
         if(t.participants.indexOf(t.pendingWith)===-1)t.participants.push(t.pendingWith);
@@ -1410,9 +1438,16 @@ function scValidate(txn,step){
        persona to a vendor code, so an SCR naming any vendor landed in the same queue and could be
        actioned by whoever held it. */
     const me=scActor(activePersonaId);
-    if(me&&me.vendorCode&&txn.scr.vendor&&txn.scr.vendor!==me.vendorCode)
-      scFormErrors.__asn='This transaction is for '+((scVendor(txn.scr.vendor)||{}).name||txn.scr.vendor)
-        +'. You can only raise an ASN against your own purchase orders.';
+    if(me&&me.vendorCode&&txn.scr.vendor&&txn.scr.vendor!==me.vendorCode){
+      // Say who CAN act, not just who cannot — routing now hands step 13 to the matching vendor
+      // login, so reaching this means the persona was switched by hand.
+      const owner=scActor(scVendorPersona(txn.scr.vendor));
+      // Its own key: sharing __asn with the inspection-document check meant whichever ran last
+      // won, and the vendor message was silently overwritten.
+      scFormErrors.__vendor='This transaction is for '+((scVendor(txn.scr.vendor)||{}).name||txn.scr.vendor)
+        +'. You can only raise an ASN against your own purchase orders'
+        +(owner&&owner.id!==me.id?' — switch to the '+owner.name+' login to continue.':'.');
+    }
     // FR13.3 — submission is blocked until the mandatory inspection documents are attached.
     if(!((txn.asn.docs||[]).length))scFormErrors.__asn='At least one inspection document must be attached before the ASN can be raised.';
   }
@@ -1443,8 +1478,13 @@ function scSecondaryAction(){
 function scNotMine(txn){
   if(!txn)return 'No transaction open.';
   if(txn.closed)return 'This transaction is closed.';
-  if(txn.pendingWith!==activePersonaId)
-    return 'This step is pending with '+scActorLabel(txn.pendingWith)+'. Only they can act on it.';
+  if(txn.pendingWith!==activePersonaId){
+    /* Name the person, not just the role. Several vendors share the label "Vendor", so
+       "pending with Vendor" left the reader with no idea which login to switch to. */
+    const a=scActor(txn.pendingWith);
+    const who=a?(a.name+' ('+a.label+')'):scActorLabel(txn.pendingWith);
+    return 'This step is pending with '+who+'. Only they can act on it.';
+  }
   return '';
 }
 function scPrimaryAction(){
