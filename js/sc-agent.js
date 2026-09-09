@@ -96,9 +96,16 @@ function scAgentGate(t){const c=scAgentClone(t);if(!c)return '';try{return scGat
    still matched as a phrase; single words must stand alone. */
 function scAgentMatch(q,words){
   const s=' '+String(q||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()+' ';
+  /* Whole words, but tolerant of ordinary inflection: "documents" must match 'document' and
+     "blocking" must match 'block'. Only these suffixes, never an open prefix match — 'log' would
+     otherwise match "logistics" and 'late' would match "PLATE-001", which is the exact class of
+     bug the word-boundary rule was introduced to kill. */
+  const forms=['','s','es','ing','ed','d'];
   return words.some(function(w){
     const t=String(w).toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
-    return t&&s.indexOf(' '+t+' ')>-1;
+    if(!t)return false;
+    if(t.indexOf(' ')>-1)return s.indexOf(' '+t+' ')>-1;      // a phrase matches literally
+    return forms.some(function(f){return s.indexOf(' '+t+f+' ')>-1;});
   });
 }
 // Prefix match, for the cases where a stem genuinely is the intent ("calculate/calculated").
@@ -648,11 +655,29 @@ function scAgentAnswer(q){
    A light markdown pass — **bold**, bullet lines and newlines — so answers can be authored as
    readable text rather than as HTML string soup. Escaped FIRST, so nothing a transaction holds
    (a vendor name, a remark someone typed) can inject markup. == */
+/* EVERY REFERENCE IN AN ANSWER IS A LINK. The board listing names thirty of them and the only
+   way to follow one was to read it off the screen and type it back in — the reference is right
+   there, so clicking it should be enough.
+
+   Applied AFTER the escape and bold passes and BEFORE the line split: at that point the string
+   holds only <b> and <i>, neither carrying attributes, so nothing can match inside markup. The
+   pattern requires both dashes, so it matches rendered numbers and never a bare year. */
+const SC_AGENT_LINK_RX=/\b((?:SUB|PO|SHP|OUT|TO|DN|CH|GP|ASN|IMR|BOM)-\d{4}-\d{3,6})\b/g;
+function scAgentLinkify(h){
+  return h.replace(SC_AGENT_LINK_RX,function(m,ref){
+    return '<span class="sca-ref" role="button" tabindex="0" data-q="Status of '+ref+'"'
+      +' title="Ask about '+ref+'"'
+      +' onclick="scAgentAsk(this.dataset.q)"'
+      +' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();scAgentAsk(this.dataset.q);}"'
+      +'>'+ref+'</span>';
+  });
+}
 function scAgentMd(s){
   let h=String(s==null?'':s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/\*\*(.+?)\*\*/g,'<b>$1</b>')
     .replace(/\*(.+?)\*/g,'<i>$1</i>');
+  h=scAgentLinkify(h);
   return h.split('\n').map(function(l){
     if(/^·\s/.test(l))return '<div class="sca-li">'+l.replace(/^·\s/,'')+'</div>';
     if(/^\s{3}/.test(l))return '<div class="sca-sub">'+l.trim()+'</div>';
@@ -992,6 +1017,15 @@ function scAgentMount(){
 '.sca-me{background:var(--navy,#0f172a);color:#fff;border-top-right-radius:5px}',
 '.sca-p{margin:0}',
 '.sca-gap{height:7px}',
+/* A reference reads as the identifier it is, and is obviously tappable — underlined on a dotted
+   rule so it does not compete with the bold figures around it. */
+'.sca-ref{color:var(--navy,#0f172a);font-weight:600;cursor:pointer;border-bottom:1px dashed #94a3b8;',
+'  padding-bottom:1px;white-space:nowrap;transition:background .12s,border-color .12s}',
+'.sca-ref:hover{background:var(--ol,#f1f5f9);border-bottom-color:var(--navy,#0f172a);border-bottom-style:solid}',
+'.sca-ref:focus-visible{outline:2px solid var(--navy,#0f172a);outline-offset:2px;border-radius:3px}',
+// Inside the user\'s own dark bubble it has to invert, or it disappears.
+'.sca-me .sca-ref{color:#fff;border-bottom-color:rgba(255,255,255,.5)}',
+'.sca-me .sca-ref:hover{background:rgba(255,255,255,.14);border-bottom-color:#fff}',
 '.sca-li{position:relative;padding-left:13px;margin:1px 0}',
 '.sca-li:before{content:"";position:absolute;left:3px;top:8px;width:4px;height:4px;border-radius:50%;background:currentColor;opacity:.42}',
 '.sca-sub{padding-left:13px;color:var(--gray,#6a7282);font-size:11.5px}',
