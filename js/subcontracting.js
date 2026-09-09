@@ -231,9 +231,11 @@ const scMaster={
      available. Held as free/reserved per bin so the check has something real to fail against;
      without it "Available Quantity" is a label with no number behind it. */
   stock:[
-    {item:'PLATE-001',warehouse:'RM-WH',location:'A1-01',free:12000,reserved:0},
+    // Sized for the thirty-record seed: roughly nine of those hold stock at once (Reserved or
+    // Staging), so the bin has to carry them all and still leave a demo something to draw on.
+    {item:'PLATE-001',warehouse:'RM-WH',location:'A1-01',free:60000,reserved:0},
     {item:'PLATE-001',warehouse:'MAIN-WH',location:'A1-01',free:300,reserved:0},
-    {item:'PIPE-002',warehouse:'MAIN-WH',location:'B2-03',free:6000,reserved:0},
+    {item:'PIPE-002',warehouse:'MAIN-WH',location:'B2-03',free:30000,reserved:0},
     {item:'PIPE-002',warehouse:'RM-WH',location:'SL-C03',free:150,reserved:0},
     {item:'PLT-SQ-2500-16MM',warehouse:'RM-WH',location:'SL-A14',free:42,reserved:0},
     {item:'CONS-BEVEL-TIP-08',warehouse:'RM-WH',location:'SL-C03',free:500,reserved:0},
@@ -1268,7 +1270,16 @@ function scSeed(){
           {item:'PIPE-002',qty:600,warehouse:'MAIN-WH',location:'B2-03',zone:'Zone B',fim:'No',ratio:0.6}]},
       po:{},shipment:{},dn:{},challan:{},asn:{},imr:{},recon:{}
     };
-    Object.assign(t,over||{});
+    over=over||{};
+    /* `scrOver` merges into the SCR instead of replacing it, so a seeded record can differ by a
+       vendor or an item without restating all twenty header fields. `age` sets how long it has
+       been sitting, which is what makes some records read as overdue and gives the board a
+       believable spread rather than thirty rows all created in the same minute. */
+    if(over.scrOver){Object.assign(t.scr,over.scrOver);delete over.scrOver;}
+    if(over.age!==undefined){t.pendingSince=new Date(Date.now()-over.age*3600000).toISOString();
+      t.createdAt=scNow();delete over.age;}
+    const close=over.close,reject=over.reject;delete over.close;delete over.reject;
+    Object.assign(t,over);
     // Walk it forward to its seeded step so pendingWith and participants are consistent.
     /* The seed WALKS the transaction rather than teleporting it: each step applies its document
        stamps, mints its document number and moves the material, exactly as a real run would.
@@ -1326,26 +1337,79 @@ function scSeed(){
           // Mirror what a real confirmation does, so a seeded reconciliation has stock behind it.
           scReceiveMaterial(t,Number(t.scr.recvQty||0));}
       }
-      t.pendingSince=new Date(Date.now()-(2+step)*3600000).toISOString();
+      if(over.age===undefined)t.pendingSince=new Date(Date.now()-(2+step)*3600000).toISOString();
     }
     t.activity.push({at:t.createdAt,iso:t.createdIso,action:'SCR Created',from:'',to:'Created',
       byId:'planner',by:'Planner',source:'Web Portal',reasonSet:'',reason:'',remarks:''});
+    /* Terminal records, so the board has history and not only work in progress. A rejected SCR
+       and a closed transaction are the two things a person most often looks up after the fact,
+       and until now neither existed to look up. */
+    if(reject){
+      t.status='Rejected';t.closed=true;t.pendingWith='';
+      scStampDoc(t,'scr','Rejected');
+      scLog(t,'Reject SCR','Sent for Approval','Rejected',
+        {byId:'pmg-approver',reasonSet:'RC-SCRREJ',reasonCode:reject,
+         reason:scReasonText('RC-SCRREJ',reject),remarks:'Rejected at approval.'});
+    }else if(close){
+      scApplyStamps(t,18);scCloseAll(t);
+      t.closed=true;t.status='Closed';t.pendingWith='';
+      t.closedBy='finance';t.closedAt=scNow();
+      scLog(t,'Close Transaction — SCR, PO, Shipment and Challan closed','Full Receipt Confirmed','Closed',{byId:'finance'});
+    }
     scState.txns.push(t);
     return t;
   };
-  mk(1,{scr:undefined});                                    // Planner — a draft to finish
-  mk(2,{});                                                 // PMG Approver — awaiting approval
-  mk(7,{});                                                 // Stores — goods issue
-  mk(4,{});                                                 // Buyer — PO to complete
-  mk(5,{});                                                 // PO Approver — PO to approve
-  mk(8,{});                                                 // Logistics User — dispatch to arrange
-  mk(9,{});                                                 // DN Approver
-  mk(10,{});                                                // Finance — challan
-  mk(11,{});                                                // Security — gate outward
-  mk(13,{});                                                // Vendor — ASN
-  mk(14,{});                                                // QC
-  mk(16,{});                                                // Stores — IMR
-  mk(17,{});                                                // Finance — reconciliation
+  /* == THE SEEDED BOARD ======================================================================
+     Thirty transactions rather than thirteen, because the copilot is only worth asking once
+     there is a backlog to ask ABOUT. Spread across every step, all three vendors, both billable
+     and non-billable, with and without logistics, and with a real tail of closed and rejected
+     records — plus a few deliberately aged past their return date so "what is overdue" has
+     something true to report. `age` is in hours. == */
+  const V=['V-1001','V-1002','V-1003'],ADR=['ADR-01','ADR-11','ADR-21'];
+  const TITLES=['Shaft machining','Shell course bevelling','Bracket fabrication','Flange facing',
+    'Plate edge preparation','Pipe spool welding','Housing boring','Cover plate drilling',
+    'Nozzle cutting','Base frame assembly'];
+  const RECV=['SHAFT-001-MC','WIP-SHELL-C3-BEVEL','CONV-ASSY-001'];
+  const seedRows=[
+    // step, options
+    [1,{draft:true}],                    [2,{age:5}],   [2,{v:1,age:31,qty:400}],
+    [4,{age:9}],   [4,{v:2,billable:'No',age:52}],      [5,{age:14}],
+    [6,{age:7}],   [6,{v:1,logistics:'No',age:26}],     [7,{age:4}],
+    [7,{v:2,age:19}],                    [8,{age:11}],  [9,{age:6}],
+    [9,{v:1,age:38}],                    [10,{age:12}], [10,{v:2,billable:'No',age:44}],
+    [11,{age:13}], [12,{age:8}],         [13,{age:21}], [13,{v:1,age:63}],
+    [14,{age:16}], [14,{v:2,age:47}],    [15,{age:9}],  [16,{age:18}],
+    [16,{v:1,qty:600,age:35}],           [17,{age:19}], [17,{v:2,age:58}],
+    [18,{age:24}],
+    [18,{close:true,age:96}],            [18,{v:1,close:true,age:150}],
+    [2,{reject:'SCRJ-01',age:120}]
+  ];
+  seedRows.forEach(function(row,i){
+    const st=row[0],o=row[1]||{};
+    const vi=o.v||0;
+    const over={age:o.age};
+    if(o.close)over.close=true;
+    if(o.reject)over.reject=o.reject;
+    over.scrOver={
+      vendor:V[vi],vendorAddress:ADR[vi],
+      title:TITLES[i%TITLES.length]+' — '+(vi===0?'ABC':vi===1?'Larsen':'Precision'),
+      recvItem:RECV[i%RECV.length],
+      recvQty:o.qty||[1000,750,500,1200,300][i%5],
+      billable:o.billable||'Yes',
+      logistics:o.logistics||'Yes',
+      // A rate contract only where the vendor actually has one; the rest are priced manually.
+      rateContract:vi===0?'RC-2026-001':(vi===1?'RC-2026-014':'NONE'),
+      price:vi===0?250:(vi===1?36000:180),
+      // Half of them are due back before today, so the overdue query has real answers.
+      issueItems:[
+        {item:'PLATE-001',qty:(o.qty||600)*1.2,warehouse:'RM-WH',location:'A1-01',zone:'Zone A',fim:'Yes',ratio:1.2},
+        {item:'PIPE-002',qty:(o.qty||600)*0.6,warehouse:'MAIN-WH',location:'B2-03',zone:'Zone B',fim:'No',ratio:0.6}]
+    };
+    if(o.draft)over.scrOver=undefined;
+    const t=mk(st,over);
+    // Past-dated returns on the older records — that is what makes them overdue at FR18.4.
+    if(t.shipment&&t.shipment.no&&(o.age||0)>30)t.shipment.expectedReturn='2026-08-15';
+  });
   // The first one is a genuine empty draft, so the Planner has something to fill in.
   const draft=scState.txns[0];
   draft.scr={base:'Production Order',unpeg:'No',interUnit:'No',fim:'No',billable:'Yes',logistics:'Yes',issueItems:[]};

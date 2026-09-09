@@ -132,7 +132,66 @@ function scAgentSubject(q){
 // Portfolio questions are about the set, not about one record.
 function scAgentIsPortfolio(q){
   return scAgentMatch(q,['all ','list','how many','everything','portfolio','overdue','which ','anything',
-    'open ','pending with','queue','summary of','across','total','count','stuck','waiting']);
+    'open ','pending with','queue','summary of','across','total','count','stuck','waiting',
+    // The terminal-state words too: "show me closed transactions" is a board question, and
+    // without these it tripped the ambiguity check and got asked "which one?" back.
+    'closed','rejected','finished','completed','history','show me','board']);
+}
+/* "What is the status of the SCR?" names no SCR. Answering it with the whole board buries the
+   one record the person means, and answering it about whatever happens to be on screen answers
+   a question they did not ask. Neither is useful, so the copilot asks back — with the range it
+   can actually resolve, which is the one thing the person needs in order to ask properly. */
+function scAgentIsAmbiguous(q){
+  return scAgentMatch(q,['scr','status','transaction','request','order','job'])&&!scAgentIsPortfolio(q);
+}
+function scAgentRange(){
+  const all=scAgentVisibleTxns().filter(function(t){return t.no;});
+  const nums=all.map(function(t){return t.no;}).sort();
+  return {all:all,first:nums[0],last:nums[nums.length-1],count:nums.length};
+}
+function scAgentRangePrompt(){
+  const r=scAgentRange();
+  if(!r.count)return 'There are no transactions on the board yet.';
+  const open=r.all.filter(function(t){return !t.closed;});
+  const closed=r.all.filter(function(t){return t.closed;});
+  return 'Which one? I have **'+r.count+'** transactions, **'+r.first+'** through **'+r.last+'**.\n\n'
+    +'· '+open.length+' open, '+closed.length+' closed or rejected\n'
+    +'· Quote any reference — the SCR, or its PO, challan, ASN or IMR number\n'
+    // The SEQUENCE, not everything after the first letter — "SUB-2026-00030" split on the dashes
+    // gives "00030", which is the part a person actually repeats.
+    +'· A bare number works too, so **'+String(r.last).split('-').pop()+'** is enough\n\n'
+    +'Or ask across the board: *what is overdue*, *what is with Finance*, *show me everything open*.';
+}
+
+/* == WHAT TO ASK NEXT ======================================================================
+   An answer that ends in silence puts the burden of knowing what is askable back on the user.
+   These are computed from the SUBJECT and its actual state — a transaction at reconciliation
+   gets offered the reconciliation questions, a blocked one gets offered the blocker — so the
+   suggestions lead somewhere rather than being a fixed menu. == */
+function scAgentFollowups(q,sub){
+  const t=sub&&sub.txn;
+  if(sub&&sub.byRef&&!t)return scAgentRange().all.slice(0,3).map(function(x){return 'Status of '+x.no;});
+  if(!t){
+    const r=scAgentRange();
+    const picks=r.all.filter(function(x){return !x.closed;}).slice(0,2).map(function(x){return 'Status of '+x.no;});
+    return picks.concat(['What is overdue?','Show me closed transactions','What is with Finance?']).slice(0,5);
+  }
+  const no=t.no||'this one',out=[];
+  if(scAgentState.agent==='recon'){
+    if(!t.closed)out.push('Why can I not close '+no+'?');
+    out.push('How is consumption calculated for '+no+'?','What is outstanding on '+no+'?');
+    out.push('Where is the material on '+no+'?');
+    return out.slice(0,4);
+  }
+  // Lead with whatever is most alive on this record right now.
+  if(!t.closed&&scAgentGate(t))out.push('Why is '+no+' blocked?');
+  else if(!t.closed)out.push('What happens next on '+no+'?');
+  out.push('Where is the material on '+no+'?');
+  out.push('Show me the documents for '+no);
+  out.push('Who has acted on '+no+'?');
+  if(t.step>=16)out.push('Explain the reconciliation for '+no);
+  if(t.scr&&t.scr.billable!=='No')out.push('What is the value of '+no+'?');
+  return out.slice(0,5);
 }
 
 /* == THE PORTFOLIO VIEW — the dashboard, answered in prose ================================== */
@@ -212,6 +271,8 @@ function scAgentAnswerAskDeal(q){
   if(sub.byRef&&!sub.txn)return 'I cannot find **'+sub.token+'**. I match on any reference a transaction carries — '
     +'SCR, PO, shipment, outbound key, delivery note, challan, gate pass, ASN, IMR or BOM. Check the number and ask again.';
 
+  // Nothing named, nothing open, and the question is about "an SCR" — ask which one.
+  if(!sub.byRef&&!sub.txn&&scAgentIsAmbiguous(q))return scAgentRangePrompt();
   // A reference always wins; otherwise a portfolio-shaped question is about the whole board.
   if(!sub.byRef&&(!sub.txn||scAgentIsPortfolio(q)))return scAgentPortfolio(q);
 
@@ -417,10 +478,21 @@ function scAgentHTML(){
   const a=SC_AGENTS.find(function(x){return x.id===scAgentState.agent;})||SC_AGENTS[0];
   const thread=scAgentThread();
   const body=thread.length
-    ? thread.map(function(m){
-        return m.role==='user'
-          ? '<div class="sca-row sca-row-me"><div class="sca-bubble sca-me">'+scAgentMd(m.text)+'</div></div>'
-          : '<div class="sca-row"><div class="sca-av">'+a.initials+'</div><div class="sca-bubble sca-bot">'+scAgentMd(m.text)+'</div></div>';
+    ? thread.map(function(m,i){
+        if(m.role==='user')
+          return '<div class="sca-row sca-row-me"><div class="sca-bubble sca-me">'+scAgentMd(m.text)+'</div></div>';
+        /* Suggestions belong to the LAST answer only. Left under every reply they pile up as the
+           thread grows and it stops being obvious which ones still apply. */
+        const last=i===thread.length-1&&!scAgentState.busy;
+        const next=(last&&(m.next||[]).length)
+          ? '<div class="sca-next"><div class="sca-next-t">Next</div>'
+            +m.next.map(function(n){
+                return '<button class="sca-chip sca-chip-next" onclick="scAgentAsk(this.dataset.q)" data-q="'
+                  +String(n).replace(/"/g,'&quot;')+'">'+scAgentMd(n).replace(/<\/?div[^>]*>/g,'')+'</button>';
+              }).join('')+'</div>'
+          : '';
+        return '<div class="sca-row"><div class="sca-av">'+a.initials+'</div>'
+          +'<div class="sca-bubble-wrap"><div class="sca-bubble sca-bot">'+scAgentMd(m.text)+'</div>'+next+'</div></div>';
       }).join('')
       +(scAgentState.busy?'<div class="sca-row"><div class="sca-av">'+a.initials+'</div>'
         +'<div class="sca-bubble sca-bot sca-typing"><span></span><span></span><span></span></div></div>':'')
@@ -518,10 +590,12 @@ function scAgentAsk(q){
   /* A short pause before the reply. Nothing is being fetched — the answer is computed
      synchronously — but an instant response reads as a lookup rather than as an assistant. */
   setTimeout(function(){
-    let answer;
-    try{answer=scAgentAnswer(q);}
-    catch(e){answer='I could not read that transaction cleanly just now. Reopen it from the board and ask me again.';}
-    thread.push({role:'bot',text:answer});
+    let answer,next=[];
+    try{
+      answer=scAgentAnswer(q);
+      next=scAgentFollowups(q,scAgentSubject(q));
+    }catch(e){answer='I could not read that transaction cleanly just now. Reopen it from the board and ask me again.';}
+    thread.push({role:'bot',text:answer,next:next});
     scAgentState.busy=false;
     scAgentRender();
   },420+Math.min(600,q.length*8));
@@ -566,7 +640,13 @@ function scAgentMount(){
 '.sca-body{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;background:var(--light,#f8f9fb)}',
 '.sca-row{display:flex;gap:8px;align-items:flex-start}',
 '.sca-row-me{justify-content:flex-end}',
+'.sca-bubble-wrap{max-width:86%;min-width:0}',
 '.sca-bubble{max-width:82%;padding:10px 12px;border-radius:12px;font-size:12.5px;line-height:1.62;word-break:break-word}',
+'.sca-bubble-wrap .sca-bubble{max-width:100%}',
+'.sca-next{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px}',
+'.sca-next-t{width:100%;font-size:9.5px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--gray,#6a7282);margin-bottom:1px}',
+'.sca-chip-next{background:var(--ol,#f1f5f9);border-style:dashed}',
+'.sca-chip-next:hover{background:var(--card,#fff);border-style:solid}',
 '.sca-bot{background:var(--card,#fff);border:1px solid var(--border,#e5e7eb);border-top-left-radius:4px}',
 '.sca-me{background:var(--navy,#0f172a);color:#fff;border-top-right-radius:4px}',
 '.sca-p{margin:0}',
