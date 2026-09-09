@@ -175,32 +175,39 @@ function scAgentRangePrompt(){
    suggestions lead somewhere rather than being a fixed menu. == */
 function scAgentFollowups(q,sub){
   const t=sub&&sub.txn;
-  if(sub&&sub.byRef&&!t)return scAgentRange().all.slice(0,3).map(function(x){return 'Status of '+x.no;});
+  if(sub&&sub.byRef&&!t)
+    return scAgentRange().all.slice(0,3).map(function(x){return {t:x.no,q:'Status of '+x.no};});
   if(!t){
     const r=scAgentRange();
-    const picks=r.all.filter(function(x){return !x.closed;}).slice(0,2).map(function(x){return 'Status of '+x.no;});
-    return picks.concat(['What is overdue?','Show me closed transactions','What is with Finance?']).slice(0,5);
+    const picks=r.all.filter(function(x){return !x.closed;}).slice(0,2)
+      .map(function(x){return {t:x.no,q:'Status of '+x.no};});
+    return picks.concat([{t:'Overdue',q:'What is overdue?'},
+      {t:'With Finance',q:'What is with Finance?'}]).slice(0,4);
   }
+  /* Short LABEL, full QUESTION. The chips used to carry the whole sentence — "What happens next
+     on SUB-2026-00138?" — so five of them stacked into five full-width rows and swamped the
+     answer above. The reference is already established by the conversation, so the chip only has
+     to name the move; the question sent is still the unambiguous one. */
   const no=t.no||'this one',out=[];
-  // A rejected record has no material, no documents beyond the SCR and no reconciliation, so the
-  // usual suggestions would all lead to dead ends. Only its history is worth offering.
-  if(scAgentRejected(t))
-    return ['Who has acted on '+no+'?','Show me closed transactions','What is overdue?'];
-  if(scAgentState.agent==='recon'){
-    if(!t.closed)out.push('Why can I not close '+no+'?');
-    out.push('How is consumption calculated for '+no+'?','What is outstanding on '+no+'?');
-    out.push('Where is the material on '+no+'?');
-    return out.slice(0,4);
+  const add=function(label,q){out.push({t:label,q:q});};
+  if(scAgentRejected(t)){
+    add('Rejection history','Who has acted on '+no+'?');
+    add('Closed & rejected','Show me closed transactions');
+    return out;
   }
-  // Lead with whatever is most alive on this record right now.
-  if(!t.closed&&scAgentGate(t))out.push('Why is '+no+' blocked?');
-  else if(!t.closed)out.push('What happens next on '+no+'?');
-  out.push('Where is the material on '+no+'?');
-  out.push('Show me the documents for '+no);
-  out.push('Who has acted on '+no+'?');
-  if(t.step>=16)out.push('Explain the reconciliation for '+no);
-  if(t.scr&&t.scr.billable!=='No')out.push('What is the value of '+no+'?');
-  return out.slice(0,5);
+  if(scAgentState.agent==='recon'){
+    if(!t.closed)add('Why blocked?','Why can I not close '+no+'?');
+    add('How is it calculated?','How is consumption calculated for '+no+'?');
+    add('What is outstanding?','What is outstanding on '+no+'?');
+    return out.slice(0,3);
+  }
+  if(!t.closed&&scAgentGate(t))add('Why blocked?','Why is '+no+' blocked?');
+  else if(!t.closed)add('What happens next?','What happens next on '+no+'?');
+  add('Where is the material?','Where is the material on '+no+'?');
+  add('Documents','Show me the documents for '+no);
+  if(t.step>=16)add('Reconciliation','Explain the reconciliation for '+no);
+  else add('Who has acted?','Who has acted on '+no+'?');
+  return out.slice(0,4);
 }
 
 /* == THE PORTFOLIO VIEW — the dashboard, answered in prose ================================== */
@@ -507,10 +514,11 @@ function scAgentHTML(){
            thread grows and it stops being obvious which ones still apply. */
         const last=i===thread.length-1&&!scAgentState.busy;
         const next=(last&&(m.next||[]).length)
-          ? '<div class="sca-next"><div class="sca-next-t">Next</div>'
+          ? '<div class="sca-next">'
             +m.next.map(function(n){
+                const label=typeof n==='string'?n:n.t,ask=typeof n==='string'?n:n.q;
                 return '<button class="sca-chip sca-chip-next" onclick="scAgentAsk(this.dataset.q)" data-q="'
-                  +String(n).replace(/"/g,'&quot;')+'">'+scAgentMd(n).replace(/<\/?div[^>]*>/g,'')+'</button>';
+                  +String(ask).replace(/"/g,'&quot;')+'">'+scEsc(label)+'</button>';
               }).join('')+'</div>'
           : '';
         // The message being typed out gets a stable id so the stream can update it in place.
@@ -540,9 +548,14 @@ function scAgentHTML(){
         return '<button class="sca-tab'+(x.id===scAgentState.agent?' on':'')+'" onclick="scAgentSwitch(\''+x.id+'\')">'+x.name+'</button>';
       }).join('')+'</div>'
     +'<div class="sca-body" id="sca-body">'+body+'</div>'
-    +'<div class="sca-chips">'+a.prompts.map(function(p){
+    /* The starter prompts are an EMPTY-STATE affordance. Once the conversation has started the
+       contextual "next" chips under the last answer do the same job better, and showing both left
+       two competing chip areas stacked above the input — four rows of static suggestions pushing
+       the actual answer off screen. */
+    +(thread.length?''
+      :'<div class="sca-chips">'+a.prompts.slice(0,5).map(function(p){
         return '<button class="sca-chip" onclick="scAgentAsk(this.dataset.q)" data-q="'+p.replace(/"/g,'&quot;')+'">'+p+'</button>';
-      }).join('')+'</div>'
+      }).join('')+'</div>')
     +'<div class="sca-input">'
       +'<input id="sca-q" placeholder="Ask about any transaction, or quote a reference…" autocomplete="off" '
         +'onkeydown="if(event.key===\'Enter\'){event.preventDefault();scAgentSendInput();}">'
@@ -550,7 +563,8 @@ function scAgentHTML(){
         +'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>'
       +'</button>'
     +'</div>'
-    +'<div class="sca-foot">Generated from this transaction’s live data. Read-only — the copilot never changes the workflow.</div>';
+    // One line. Two wrapped to three rows on a 404px panel and ate the space the answer needed.
+    +'<div class="sca-foot">Read-only · generated from live data</div>';
 }
 
 function scAgentRender(){
@@ -765,10 +779,9 @@ function scAgentMount(){
 '.sca-bubble-wrap{max-width:88%;min-width:0}',
 '.sca-bubble{max-width:82%;padding:11px 13px;border-radius:14px;font-size:12.5px;line-height:1.68;word-break:break-word}',
 '.sca-bubble-wrap .sca-bubble{max-width:100%}',
-'.sca-next{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px}',
-'.sca-next-t{width:100%;font-size:9.5px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--gray,#6a7282);margin-bottom:1px}',
-'.sca-chip-next{background:var(--ol,#f1f5f9);border-style:dashed}',
-'.sca-chip-next:hover{background:var(--card,#fff);border-style:solid}',
+'.sca-next{margin-top:9px;display:flex;flex-wrap:wrap;gap:6px}',
+'.sca-chip-next{background:transparent;border-color:#cbd5e1;color:var(--gray,#6a7282);font-size:11px;padding:5px 10px}',
+'.sca-chip-next:hover{background:var(--card,#fff);border-color:var(--navy,#0f172a);color:var(--navy,#0f172a)}',
 '.sca-bot{background:var(--card,#fff);border:1px solid var(--border,#e5e7eb);border-top-left-radius:5px;',
 '  box-shadow:0 1px 2px rgba(15,23,42,.04)}',
 '.sca-bot b{font-weight:650}',
@@ -812,7 +825,7 @@ function scAgentMount(){
 '.sca-send{width:36px;height:36px;border-radius:10px;border:0;background:var(--navy,#0f172a);color:#fff;cursor:pointer;',
 '  display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:opacity .15s}',
 '.sca-send:hover{opacity:.86}',
-'.sca-foot{padding:0 16px 12px;font-size:10.5px;line-height:1.5;color:var(--gray,#6a7282)}',
+'.sca-foot{padding:0 16px 11px;font-size:10px;line-height:1.4;color:var(--gray,#6a7282);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
 '@media (max-width:520px){#sc-agent-panel{width:100vw}}'
 ].join('\n');
   document.head.appendChild(css);

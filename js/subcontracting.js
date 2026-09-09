@@ -752,13 +752,12 @@ function scRunFr3(txn){
       const rc=scRateContract(s.rateContract);
       txn.po.rateContract=s.rateContract;
       if(rc){txn.po.price=rc.price;txn.po.basis=rc.basis;txn.po.currency=rc.currency;}
-    }else{
-      // Priced manually on the SCR — carry that forward so the Buyer inherits the agreed rate
-      // instead of re-keying it, and the PO's price field stays editable.
-      if(s.price)txn.po.price=s.price;
-      if(s.basis)txn.po.basis=s.basis;
-      if(s.currency)txn.po.currency=s.currency;
     }
+    /* The SCR's estimate is NOT copied into the PO's price. FR1.5 calls it an "Estimated value
+       for planning/reference" and FR4.3 puts the real one with the Buyer — "No valid Rate
+       Contract exists → Buyer shall enter the applicable Price / Unit". Pre-filling it would
+       quietly turn the Planner's estimate into the contracted rate without anyone agreeing to
+       it. It is shown on the PO screen for reference instead, which is what an estimate is for. */
   }
   const sys={byId:'',by:'System',role:'Automated',source:'System'};
   scLog(txn,txn.product.created
@@ -1066,26 +1065,28 @@ const SC_FORMS={
          conditional — "Applicable where valid Rate Contract exists" — so a vendor with no
          contract is a normal case, and the Planner then states the rate themselves. Leaving it
          blank read as "not filled in yet" and gave nowhere to put the price. */
+      // FR1.5 lists this as a "Reference — Approved Rate Contract — Where applicable". It points
+      // at the contract the PO will price against; it does not set a price here.
       {id:'rateContract',label:'Rate Contract',type:'select',opts:function(f){
-        return [{v:'NONE',t:'None — enter price manually'}].concat(
+        return [{v:'NONE',t:'None — no contract applies'}].concat(
           scMaster.rateContracts.filter(function(r){return r.status==='Active'&&(!f.vendor||r.vendor===f.vendor);})
             .map(function(r){return{v:r.no,t:r.no+' · ₹'+r.price+' '+r.basis};}));},
-       help:'Active contracts for the selected vendor, or None to price it manually'},
-      // Shown only when there is no contract to derive the rate from, and mandatory when shown.
-      {id:'price',label:'Price / Unit',type:'num',req:true,ph:'0.00',
-       when:function(f){return f.rateContract==='NONE'&&f.billable!=='No';},
-       help:'No rate contract selected — enter the agreed rate per unit'},
-      {id:'basis',label:'Price Basis',type:'select',req:true,
-       when:function(f){return f.rateContract==='NONE'&&f.billable!=='No';},
-       opts:function(){return scMaster.priceBasis.map(function(b){return{v:b,t:b};});}},
-      {id:'currency',label:'Currency',type:'select',req:true,def:'INR',
-       when:function(f){return f.rateContract==='NONE'&&f.billable!=='No';},
-       opts:function(){return scMaster.currencies.map(function(c){return{v:c,t:c};});}},
-      {id:'rcPrice',label:'Price / Unit',type:'ro',
+       help:'Reference only — the contract the Buyer will price the PO against'},
+      /* FR1.5 calls this "Estimated Price / Unit — Numeric — Planner — Where applicable —
+         Estimated value for planning/reference". It is NOT the PO's price. The binding rate is
+         FR4.2's "Price / Unit — Buyer / Rate Contract — Billable only — Mandatory for Billable
+         PO", and FR4.3 is explicit about who supplies it: "No valid Rate Contract exists → Buyer
+         shall enter the applicable Price / Unit". Labelling this one "Price / Unit" and making it
+         mandatory turned a planning estimate into a second commercial entry, which is why it read
+         as keying the same number twice. Optional, always visible, and named for what it is. */
+      {id:'price',label:'Estimated Price / Unit',type:'num',ph:'0.00',
+       when:function(f){return f.billable!=='No';},
+       help:'For planning and reference only. The binding rate is set by the Buyer on the PO.'},
+      {id:'rcPrice',label:'Rate Contract Price',type:'ro',
        when:function(f){return !!f.rateContract&&f.rateContract!=='NONE'&&f.billable!=='No';},
        val:function(f){const rc=scRateContract(f.rateContract);
-         return rc?rc.price+' '+rc.currency+' '+rc.basis+'  ·  locked to '+rc.no:'';},
-       help:'Derived from the rate contract and read-only (FR4.3)'},
+         return rc?rc.price+' '+rc.currency+' '+rc.basis+'  ·  '+rc.no:'';},
+       help:'Carried to the PO, where it becomes the read-only rate (FR4.3)'},
       {id:'buyer',label:'Buyer',type:'select',opts:function(){return[{v:'buyer',t:scActor('buyer').name}];}},
       {id:'purchaseOffice',label:'Purchase Office',type:'select',req:true,opts:function(){return scMaster.purchaseOffices.map(function(p){return{v:p.code,t:p.name};});}},
       {id:'remarks',label:'Remarks',type:'textarea',ph:'Internal remarks',max:500},
@@ -1165,8 +1166,16 @@ const SC_FORMS={
        val:function(f){const rc=scRateContract(f.rateContract);return rc?rc.price+'  ·  locked to '+rc.no:'';},
        help:'Read-only — derived from the approved rate contract (FR4.3)'},
       // Editable whenever no contract governs the rate, including an explicit "None".
+      // FR4.3: "No valid Rate Contract exists → Buyer shall enter the applicable Price / Unit".
       {id:'price',label:'Price / Unit',type:'num',req:true,
-       when:function(f,t){return (!t||t.scr.billable!=='No')&&(!f.rateContract||f.rateContract==='NONE');},ph:'0.00'},
+       when:function(f,t){return (!t||t.scr.billable!=='No')&&(!f.rateContract||f.rateContract==='NONE');},ph:'0.00',
+       help:'Mandatory for a billable PO — this is the contracted rate'},
+      /* The Planner's estimate, shown beside the field the Buyer has to fill. It is reference,
+         never a default: FR4.2 sources the PO price from "Buyer / Rate Contract", not from the
+         SCR, so copying it in would commit a number nobody agreed. */
+      {id:'scrEstimate',label:'Estimated Price / Unit (SCR)',type:'ro',
+       when:function(f,t){return !!(t&&t.scr.price)&&t.scr.billable!=='No'&&(!f.rateContract||f.rateContract==='NONE');},
+       val:function(f,t){return t&&t.scr.price?t.scr.price+'  ·  planning estimate, not binding':'';}},
       {id:'basis',label:'Price Basis',type:'select',req:true,when:function(f,t){return !t||t.scr.billable!=='No';},
        opts:function(){return scMaster.priceBasis.map(function(b){return{v:b,t:b};});}},
       {id:'currency',label:'Currency',type:'select',req:true,when:function(f,t){return !t||t.scr.billable!=='No';},
