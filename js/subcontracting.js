@@ -44,11 +44,11 @@ const SC_ACTORS=[
    focus:'Raises sub-contracting requests, creates shipments and reserves material, and confirms despatch to the vendor.',
    // Step 3 is NOT here: FR3's product / BOM processing is run by the system on SCR approval
    // (FR2.5), so it is nobody's queue. It stays in SC_STEPS as a stage of the journey.
-   journeys:['sub-contracting'],scSteps:[1,6,7,12],approvals:0,owned:5,
+   journeys:['sub-contracting'],scSteps:[1,6],approvals:0,owned:4,
    kpis:[['Draft SCRs','2'],['Awaiting Approval','3'],['Shipments Open','1'],['Returned to Me','1']]},
   {id:'pmg-approver',name:'Anil Deshmukh',label:'PMG Approver',department:'Planning / PMG',function:'Approver',initials:'AD',email:'anil.deshmukh@adt.com',
    focus:'Approves, returns or rejects sub-contracting requests, and confirms shipment at the vendor.',
-   journeys:['sub-contracting'],scSteps:[2,12],approvals:3,owned:2,
+   journeys:['sub-contracting'],scSteps:[2,12],approvals:3,owned:3,
    kpis:[['Approval Queue','3'],['Returned','1'],['Rejected','0'],['SLA Risk','0']]},
   {id:'buyer',name:'Rahul Mehta',label:'Buyer',department:'Procurement',function:'Executor',initials:'RM',email:'rahul.mehta@adt.com',
    focus:'Completes the commercial terms on the sub-contracting PO and returns the SCR when it needs correction.',
@@ -131,7 +131,10 @@ const SC_STEPS=[
   {no:9, name:'Delivery Note Generation & Approval',            short:'Delivery Note',     actors:['dn-approver'],          phase:'dispatch',    doc:'dn'},
   {no:10,name:'Challan Generation',                             short:'Challan',           actors:['finance'],              phase:'dispatch',    doc:'challan'},
   {no:11,name:'Security Gate Outward',                          short:'Gate Outward',      actors:['security'],             phase:'dispatch',    doc:'challan'},
-  {no:12,name:'Shipment Confirmation',                          short:'Confirm Shipment',  actors:['planner','pmg-approver'],phase:'dispatch',   doc:'shipment'},
+  // FR12 is titled "Planner / PMG Shipment Confirmation" and names both; the PMG Approver holds
+  // it, which keeps the confirmation that material has left the plant with the approving role
+  // rather than with the Planner who raised the shipment.
+  {no:12,name:'Shipment Confirmation',                          short:'Confirm Shipment',  actors:['pmg-approver','planner'],phase:'dispatch',   doc:'shipment'},
   {no:13,name:'Vendor ASN Creation',                            short:'Vendor ASN',        actors:['vendor'],               phase:'vendor',      doc:'asn'},
   {no:14,name:'QC Clearance of ASN',                            short:'QC Clearance',      actors:['qc'],                   phase:'inbound',     doc:'asn'},
   {no:15,name:'Security Gate Inward',                           short:'Gate Inward',       actors:['security'],             phase:'inbound',     doc:'asn'},
@@ -203,9 +206,11 @@ const scMaster={
   // which is why FR1.7's "a Receivable Item shall not be the same Product as its Issue Item" has
   // to be enforced in validation rather than by keeping two lists.
   items:[
-    {code:'WIP-SHELL-C3-BEVEL',name:'Shell Course 3 – Bevelled',kind:'WIP',uom:'Nos',hsn:'7308',receivable:true},
-    {code:'SHAFT-001-MC',name:'Drive Shaft – Machined',kind:'Semi Finished',uom:'Nos',hsn:'8483',receivable:true},
-    {code:'CONV-ASSY-001',name:'Conveyor Support Assembly',kind:'Semi Finished',uom:'EA',hsn:'7308',receivable:true},
+    // `inspection` is Master Data section B's Inspection Requirement Configuration: it decides
+    // whether FR13.3 demands inspection documents before the ASN, and FR14.4 before QC clearance.
+    {code:'WIP-SHELL-C3-BEVEL',name:'Shell Course 3 – Bevelled',kind:'WIP',uom:'Nos',hsn:'7308',receivable:true,inspection:true},
+    {code:'SHAFT-001-MC',name:'Drive Shaft – Machined',kind:'Semi Finished',uom:'Nos',hsn:'8483',receivable:true,inspection:true},
+    {code:'CONV-ASSY-001',name:'Conveyor Support Assembly',kind:'Semi Finished',uom:'EA',hsn:'7308',receivable:true,inspection:false},
     {code:'PLT-SQ-2500-16MM',name:'MS Plate 2500x16mm',kind:'Plate',uom:'MT',hsn:'72085100',tax:'GST18-JW'},
     {code:'PLATE-001',name:'MS Plate 10mm',kind:'Raw Material',uom:'Kg',hsn:'720852',tax:'GST18'},
     {code:'PIPE-002',name:'MS Pipe 50mm',kind:'Raw Material',uom:'Nos',hsn:'730640',tax:'GST18'},
@@ -273,6 +278,13 @@ scMaster.vendors.filter(function(v){return v.type==='External';}).forEach(functi
     journeys:['sub-contracting'],scSteps:[13],approvals:0,owned:0,
     kpis:[['Open POs','0'],['ASNs Raised','0'],['Returned to Me','0'],['Due This Week','0']]});
 });
+/* Master Data section B item 5 — "Inspection Requirement Configuration … Determines when ASN
+   Inspection Documents are mandatory". Held on the item master as `inspection`, so FR13.3's
+   "where inspection is required" and FR14.4's pre-clearance check read the same flag. */
+function scInspectionRequired(txn){
+  const it=scItem(txn&&txn.scr&&txn.scr.recvItem);
+  return !!(it&&it.inspection);
+}
 // Which Vendor login owns a transaction: the one whose vendorCode matches the SCR's vendor.
 function scVendorPersona(code){
   const a=SC_ACTORS.find(function(x){return x.vendorCode&&x.vendorCode===code;});
@@ -734,10 +746,16 @@ function scRunFr3(txn){
        was carried across, so the Buyer re-keyed values the system already held and the auto-fill
        only fired if they happened to re-pick the same contract by hand. */
     if(s.purchaseOffice)txn.po.purchaseOffice=s.purchaseOffice;
-    if(s.rateContract){
+    if(s.rateContract&&s.rateContract!=='NONE'){
       const rc=scRateContract(s.rateContract);
       txn.po.rateContract=s.rateContract;
       if(rc){txn.po.price=rc.price;txn.po.basis=rc.basis;txn.po.currency=rc.currency;}
+    }else{
+      // Priced manually on the SCR — carry that forward so the Buyer inherits the agreed rate
+      // instead of re-keying it, and the PO's price field stays editable.
+      if(s.price)txn.po.price=s.price;
+      if(s.basis)txn.po.basis=s.basis;
+      if(s.currency)txn.po.currency=s.currency;
     }
   }
   const sys={byId:'',by:'System',role:'Automated',source:'System'};
@@ -1042,9 +1060,30 @@ const SC_FORMS={
       {id:'logistics',label:'Logistics Required',type:'yesno',req:true,def:'Yes'},
       {id:'nonBillReason',label:'Reason for Non-Billable',type:'reason',set:'RC-NONBILL',req:true,
        when:function(f){return f.billable==='No';},help:'Mandatory when Billable = No'},
+      /* "None" is an explicit choice, not an empty dropdown. FR4.3 makes the rate contract
+         conditional — "Applicable where valid Rate Contract exists" — so a vendor with no
+         contract is a normal case, and the Planner then states the rate themselves. Leaving it
+         blank read as "not filled in yet" and gave nowhere to put the price. */
       {id:'rateContract',label:'Rate Contract',type:'select',opts:function(f){
-        return scMaster.rateContracts.filter(function(r){return r.status==='Active'&&(!f.vendor||r.vendor===f.vendor);})
-          .map(function(r){return{v:r.no,t:r.no+' · ₹'+r.price+' '+r.basis};});},help:'Only active contracts for the selected vendor'},
+        return [{v:'NONE',t:'None — enter price manually'}].concat(
+          scMaster.rateContracts.filter(function(r){return r.status==='Active'&&(!f.vendor||r.vendor===f.vendor);})
+            .map(function(r){return{v:r.no,t:r.no+' · ₹'+r.price+' '+r.basis};}));},
+       help:'Active contracts for the selected vendor, or None to price it manually'},
+      // Shown only when there is no contract to derive the rate from, and mandatory when shown.
+      {id:'price',label:'Price / Unit',type:'num',req:true,ph:'0.00',
+       when:function(f){return f.rateContract==='NONE'&&f.billable!=='No';},
+       help:'No rate contract selected — enter the agreed rate per unit'},
+      {id:'basis',label:'Price Basis',type:'select',req:true,
+       when:function(f){return f.rateContract==='NONE'&&f.billable!=='No';},
+       opts:function(){return scMaster.priceBasis.map(function(b){return{v:b,t:b};});}},
+      {id:'currency',label:'Currency',type:'select',req:true,def:'INR',
+       when:function(f){return f.rateContract==='NONE'&&f.billable!=='No';},
+       opts:function(){return scMaster.currencies.map(function(c){return{v:c,t:c};});}},
+      {id:'rcPrice',label:'Price / Unit',type:'ro',
+       when:function(f){return !!f.rateContract&&f.rateContract!=='NONE'&&f.billable!=='No';},
+       val:function(f){const rc=scRateContract(f.rateContract);
+         return rc?rc.price+' '+rc.currency+' '+rc.basis+'  ·  locked to '+rc.no:'';},
+       help:'Derived from the rate contract and read-only (FR4.3)'},
       {id:'buyer',label:'Buyer',type:'select',opts:function(){return[{v:'buyer',t:scActor('buyer').name}];}},
       {id:'purchaseOffice',label:'Purchase Office',type:'select',req:true,opts:function(){return scMaster.purchaseOffices.map(function(p){return{v:p.code,t:p.name};});}},
       {id:'remarks',label:'Remarks',type:'textarea',ph:'Internal remarks',max:500},
@@ -1109,8 +1148,9 @@ const SC_FORMS={
        def:function(f,t){return t?t.scr.rateContract:'';},
        opts:function(f,t){
          const vendor=t&&t.scr.vendor;
-         return scMaster.rateContracts.filter(function(r){return r.status==='Active'&&(!vendor||r.vendor===vendor);})
-           .map(function(r){return{v:r.no,t:r.no+' · ₹'+r.price+' '+r.basis};});},
+         return [{v:'NONE',t:'None — enter price manually'}].concat(
+           scMaster.rateContracts.filter(function(r){return r.status==='Active'&&(!vendor||r.vendor===vendor);})
+             .map(function(r){return{v:r.no,t:r.no+' · ₹'+r.price+' '+r.basis};}));},
        help:'Active contracts for this vendor only — auto-fills price, basis and currency'},
       /* FR4.3 — "Where the Price is derived from an approved Rate Contract, it shall remain
          read-only unless an authorized override is specifically permitted." It stayed a free
@@ -1118,11 +1158,13 @@ const SC_FORMS={
       // A distinct id, not a second field called `price` — scLiveForm keys by id, so two entries
       // sharing one would overwrite each other in the form buffer. `price` stays the stored value
       // (scSetField auto-fills it from the contract); this is the read-only presentation of it.
-      {id:'priceLocked',label:'Price / Unit',type:'ro',when:function(f,t){return (!t||t.scr.billable!=='No')&&!!f.rateContract;},
+      {id:'priceLocked',label:'Price / Unit',type:'ro',
+       when:function(f,t){return (!t||t.scr.billable!=='No')&&!!f.rateContract&&f.rateContract!=='NONE';},
        val:function(f){const rc=scRateContract(f.rateContract);return rc?rc.price+'  ·  locked to '+rc.no:'';},
        help:'Read-only — derived from the approved rate contract (FR4.3)'},
+      // Editable whenever no contract governs the rate, including an explicit "None".
       {id:'price',label:'Price / Unit',type:'num',req:true,
-       when:function(f,t){return (!t||t.scr.billable!=='No')&&!f.rateContract;},ph:'0.00'},
+       when:function(f,t){return (!t||t.scr.billable!=='No')&&(!f.rateContract||f.rateContract==='NONE');},ph:'0.00'},
       {id:'basis',label:'Price Basis',type:'select',req:true,when:function(f,t){return !t||t.scr.billable!=='No';},
        opts:function(){return scMaster.priceBasis.map(function(b){return{v:b,t:b};});}},
       {id:'currency',label:'Currency',type:'select',req:true,when:function(f,t){return !t||t.scr.billable!=='No';},
@@ -1146,7 +1188,15 @@ const SC_FORMS={
       {id:'dnApprover',label:'Delivery Note Approver',type:'select',req:true,opts:function(){return[{v:'dn-approver',t:scActor('dn-approver').name}];}},
       {id:'expectedReturn',label:'Expected Date of Return',type:'date',req:true,future:true,help:'Must be a future date'},
       {id:'reference',label:'Your / Our Reference',type:'text',ph:'Optional'},
-      {id:'remarks',label:'Remarks',type:'textarea',ph:'Optional',max:500}
+      {id:'remarks',label:'Remarks',type:'textarea',ph:'Optional',max:500},
+      /* FR7.4 — the Outbound Key and the Transfer Order are system-generated on Submit Shipment
+         and read-only ("be system-generated and read-only; not require separate manual creation").
+         Shown here so the Planner can see they do not yet exist, and see them the moment they do
+         — "View Outbound Key shall be enabled on the Shipment page" once generated. */
+      {id:'outboundKey',label:'Outbound Key No.',type:'ro',
+       val:function(f,t){return (t&&t.shipment.outboundKey)||'Not generated — created on Submit Shipment';}},
+      {id:'transferOrder',label:'Transfer Order No.',type:'ro',
+       val:function(f,t){return (t&&t.shipment.transferOrder)||'Not generated — created with the Outbound Key';}}
     ]},
     // FR7.5 lines 878–879 — the section lives on the SHIPMENT page, and the Planner may fill in
     // whatever is already known while preparing it. Optional here; completed after goods issue.
@@ -1364,9 +1414,12 @@ function scSetField(id,v){
   scForm[id]=v;
   delete scFormErrors[id];
   // Rate contract auto-fills the commercial terms (FR4.3).
-  if(id==='rateContract'&&v){
-    const rc=scRateContract(v);
+  if(id==='rateContract'){
+    const rc=v&&v!=='NONE'?scRateContract(v):null;
     if(rc){scForm.price=rc.price;scForm.basis=rc.basis;scForm.currency=rc.currency;}
+    // Choosing None clears a rate carried over from a contract, so the manual box starts empty
+    // rather than pre-filled with someone else's price.
+    else if(v==='NONE'){scForm.price='';scForm.basis='';scForm.currency='INR';}
   }
   // Changing the production order clears the operations (FR1.3).
   if(id==='prodOrder'){scForm.opFrom='';scForm.opTo='';}
@@ -1466,8 +1519,14 @@ function scValidate(txn,step){
         +'. You can only raise an ASN against your own purchase orders'
         +(owner?' — switch to the '+owner.name+' login to continue.':'.');
     }
-    // FR13.3 — submission is blocked until the mandatory inspection documents are attached.
-    if(!((txn.asn.docs||[]).length))scFormErrors.__asn='At least one inspection document must be attached before the ASN can be raised.';
+    /* FR13.3 — "mandatory inspection documents are attached WHERE INSPECTION IS REQUIRED". It was
+       enforced unconditionally, which blocked every ASN including items that need no inspection.
+       Master Data section B item 5 is the governing config: "Inspection Requirement Configuration
+       | Item/Service, Inspection Required Y/N | Determines when ASN Inspection Documents are
+       mandatory". Read from the item master now, so it is a rule with data behind it. */
+    if(scInspectionRequired(txn)&&!((txn.asn.docs||[]).length))
+      scFormErrors.__asn='Inspection is required for '+(txn.scr.recvItem||'this item')
+        +' — attach at least one inspection document before raising the ASN.';
   }
   // FR6.3 — the availability check is a hard block on submission, not a warning on a panel.
   if(step===6){
@@ -2154,17 +2213,24 @@ function scRow(l,v){return '<div class="sc-kv"><span>'+scEsc(l)+'</span><b>'+(v=
    PO Closed, Shipment Closed, Challan Closed — while the Delivery Note is still Approved, the
    ASN still QC Cleared and the IMR still Confirmed, exactly as FR18.3 requires. -- */
 function scDocsHTML(txn){
+  // Which of these can be opened as an actual document rather than just a row in a list.
+  const viewable={dn:'dn',challan:'challan',imr:'imr'};
   const rows=[['scr',txn.no],['po',txn.po.no],['shipment',txn.shipment.no],['dn',txn.dn.no],
     ['challan',txn.challan.no],['asn',txn.asn.no],['imr',txn.imr.no]]
     .filter(function(p){return p[1];})
     .map(function(p){
       const st=scDocStatus(txn,p[0]);
       return '<tr><td>'+scEsc(SC_DOC_LABELS[p[0]])+'</td><td><b>'+scEsc(p[1])+'</b></td>'
-        +'<td>'+(st?scChip(st,scStatusTone(st)):'<span class="sc-dim">—</span>')+'</td></tr>';
+        +'<td>'+(st?scChip(st,scStatusTone(st)):'<span class="sc-dim">—</span>')+'</td>'
+        +'<td>'+(viewable[p[0]]?'<button class="sc-doc-view" onclick="scOpenDoc(\''+viewable[p[0]]+'\')">View</button>':'')+'</td></tr>';
     }).join('');
   if(!rows)return '';
+  const ok=txn.shipment.outboundKey
+    ?'<tr><td>Outbound Key</td><td><b>'+scEsc(txn.shipment.outboundKey)+'</b></td>'
+      +'<td>'+scChip('Generated','green')+'</td>'
+      +'<td><button class="sc-doc-view" onclick="scOpenDoc(\'outbound\')">View</button></td></tr>':'';
   return '<div class="sc-sec"><div class="sc-sec-h">Documents</div>'
-    +scPanelTable(['Document','Number','Status'],rows,380)
+    +scPanelTable(['Document','Number','Status',''],rows+ok,420)
     +'<div class="sc-kv-grid">'+scRow('Material position',scChip(txn.position||'Main','blue'))
       +scRow('Receivable line status',scChip(scLineStatus(txn),scStatusTone(scLineStatus(txn))))
       +(txn.shipment.expectedReturn?scRow('Expected date of return',scEsc(txn.shipment.expectedReturn)+(scOverdue(txn)?' '+scChip('Overdue','red'):'')):'')
@@ -2400,8 +2466,8 @@ function scGateBlock(txn){
   }
   // FR14.4 — "Before clearance, the system shall validate: required inspection documents are
   // available". The screen already SAID this in red; nothing stopped Clear ASN.
-  if(txn.step===14&&!((txn.asn.docs||[]).length))
-    return 'Inspection documents must be attached before the ASN can be cleared. Return the ASN to the vendor.';
+  if(txn.step===14&&scInspectionRequired(txn)&&!((txn.asn.docs||[]).length))
+    return 'Inspection is required for this item and no document is attached. Return the ASN to the vendor.';
   if(txn.step===17){
     scComputeRecon(txn);
     if(Number(txn.recon.pending||0)>0)return 'Pending receivable must be nil or short-closed before full receipt can be confirmed.';
@@ -2604,6 +2670,105 @@ function scPanel3(txn){
     +scPanelTable(['Parent / Receivable','Component / Issue Item','Issue Qty','BOM Ratio','BOM Reference'],rows,620)
     +'<div class="sc-help">BOM Ratio = Issue Quantity ÷ Expected Receivable Quantity. Reconciliation consumes against this ratio at FR17.4.</div></div>';
 }
+/* == THE PRINTED DOCUMENTS =================================================================
+   The Outbound Key, Delivery Note, Challan and IMR are things a person physically carries,
+   scans or files. Rendering them as another key-value grid made them look like screens; the
+   FRD calls the Outbound Key a pick list that "may be viewed digitally or printed", and the
+   challan travels with the vehicle. These render as documents — a masthead with the number and
+   status, party blocks, a line table and a footer — so what is on screen is recognisably the
+   piece of paper it stands for. == */
+let scDocSheet=null;                 // which document is open in the slide-over, or null
+function scOpenDoc(kind){scDocSheet=kind;renderADTPage();}
+function scCloseDoc(){scDocSheet=null;renderADTPage();}
+function scDocRow(l,v){
+  return '<div class="sc-doc-r"><span>'+scEsc(l)+'</span><b>'+(v==null||v===''?'—':v)+'</b></div>';
+}
+function scDocHead(title,no,status,tone,sub){
+  return '<div class="sc-doc-head"><div class="sc-doc-title">'+scEsc(title)+'</div>'
+    +'<div class="sc-doc-no">'+scEsc(no||'Not generated')+'</div>'
+    +(status?'<div>'+scChip(status,tone||'blue')+'</div>':'')
+    +(sub?'<div class="sc-doc-sub">'+scEsc(sub)+'</div>':'')+'</div>';
+}
+// A drawn barcode block — the Outbound Key is scanned at the gate, so it looks scannable.
+function scDocBarcode(seed){
+  const s=String(seed||'');let bars='';
+  for(let i=0;i<44;i++){
+    const w=1+((s.charCodeAt(i%(s.length||1))+i*7)%3);
+    bars+='<i style="width:'+w+'px'+((i%2)?';background:transparent':'')+'"></i>';
+  }
+  return '<div class="sc-doc-bar">'+bars+'</div><div class="sc-doc-barno">'+scEsc(seed||'')+'</div>';
+}
+function scOutboundKeyHTML(txn){
+  const sh=txn.shipment,s=txn.scr,v=scVendor(s.vendor);
+  const rows=scShipLines(txn).map(function(r,i){
+    const it=scItem(r.item);
+    return '<tr><td>'+(i+1)+'</td><td><b>'+scEsc(r.item)+'</b><div class="sc-sub">'+scEsc(it?it.name:'')+'</div></td>'
+      +'<td>'+scEsc(r.qty)+' '+scEsc(it?it.uom:'')+'</td><td>'+scEsc(r.warehouse)+'</td><td>'+scEsc(r.location)+'</td>'
+      +'<td>'+scEsc(sh.lot||'—')+'</td></tr>';
+  }).join('');
+  return scDocHead('Outbound Key',sh.outboundKey,sh.outboundKey?'Generated':'',
+      'green','Generated '+(sh.issuedAt||txn.pendingSince?scSince(txn.pendingSince):''))
+    +(sh.outboundKey?scDocBarcode(sh.outboundKey):'')
+    +'<div class="sc-doc-sec">Basic details</div><div class="sc-doc-grid">'
+      +scDocRow('Shipment No.',scEsc(sh.no))+scDocRow('SCR No.',scEsc(txn.no))
+      +scDocRow('PO No.',scEsc(txn.po.no))+scDocRow('Transfer Order No.',scEsc(sh.transferOrder))
+      +scDocRow('Vendor',scEsc(v?v.name:s.internalBP))
+      +scDocRow('Project / Order',scEsc(s.prodOrder||s.project))
+    +'</div>'
+    +'<div class="sc-doc-sec">Material to pick</div>'
+    +scPanelTable(['#','Issue Item','Quantity','Warehouse','Storage Loc.','Lot / Serial'],rows,0)
+    +'<div class="sc-doc-sec">Logistics</div><div class="sc-doc-grid">'
+      +scDocRow('Package Type',scEsc(sh.packageType))+scDocRow('No. of Packages',scEsc(sh.packages))
+      +scDocRow('Package Weight',scEsc(sh.weight?sh.weight+' '+(sh.weightUom||''):''))
+      +scDocRow('Mode of Dispatch',scEsc(sh.dispatchMode))
+      +scDocRow('Transporter',scEsc(sh.transporter))+scDocRow('Vehicle No.',scEsc(sh.vehicle))
+      +scDocRow('Driver',scEsc(sh.driver))+scDocRow('LR / Transport Ref.',scEsc(sh.lr))
+      +scDocRow('Insurance',scEsc(sh.insurance==='Yes'?(sh.insuredBy||'Yes'):'No'))
+      +scDocRow('Loading Contact',scEsc(sh.contact))
+    +'</div>'
+    +'<div class="sc-warn blue" style="margin-top:12px">This key must accompany the material at the security gate. '
+    +'Quantities cannot be changed once the key is generated.</div>';
+}
+function scImrDocHTML(txn){
+  const s=txn.scr,it=scItem(s.recvItem),r=scComputeRecon(txn);
+  return scDocHead('Inward Material Receipt',txn.imr.no,scDocStatus(txn,'imr'),'green',
+      txn.imr.receiptAt||'')
+    +'<div class="sc-doc-sec">Receipt</div><div class="sc-doc-grid">'
+      +scDocRow('IMR No.',scEsc(txn.imr.no))+scDocRow('Against ASN',scEsc(txn.asn.no))
+      +scDocRow('SCR No.',scEsc(txn.no))+scDocRow('PO No.',scEsc(txn.po.no))
+      +scDocRow('Received By',scEsc(txn.imr.receivedBy?scActorLabel(txn.imr.receivedBy):''))
+      +scDocRow('Receipt Date-Time',scEsc(txn.imr.receiptAt))
+      +scDocRow('Receiving Location',scEsc(txn.imr.receivingLocation))
+      +scDocRow('Lot / Serial',scEsc(txn.imr.lot))
+    +'</div>'
+    +'<div class="sc-doc-sec">Receivable</div>'
+    +scPanelTable(['Receivable Item','Expected','Received','Short','Line Status'],
+      '<tr><td><b>'+scEsc(s.recvItem)+'</b><div class="sc-sub">'+scEsc(it?it.name:'')+'</div></td>'
+      +'<td>'+scEsc(s.recvQty)+' '+scEsc(it?it.uom:'')+'</td><td>'+scEsc(txn.imr.receivedQty||0)+'</td>'
+      +'<td>'+scEsc(txn.imr.short||0)+'</td><td>'+scChip(scLineStatus(txn),scStatusTone(scLineStatus(txn)))+'</td></tr>',0)
+    +'<div class="sc-doc-sec">Against the material issued</div><div class="sc-doc-grid">'
+      +scDocRow('Issued to vendor',r.issued)+scDocRow('Consumed against BOM',r.consumed)
+      +scDocRow('Returned unused',r.returned)+scDocRow('Outstanding',r.outstanding)
+    +'</div>';
+}
+function scDocSheetHTML(txn){
+  if(!scDocSheet)return '';
+  const map={outbound:['Outbound Key',scOutboundKeyHTML],
+    dn:['Delivery Note',function(t){return scPanelDoc(t,'dn');}],
+    challan:['Challan',function(t){return scPanelDoc(t,'challan');}],
+    imr:['Inward Material Receipt',scImrDocHTML]};
+  const spec=map[scDocSheet];if(!spec)return '';
+  let body='';
+  try{body=spec[1](txn);}catch(e){body='<div class="sc-warn red">This document is not available yet.</div>';}
+  return '<div class="sc-doc-back" onclick="scCloseDoc()"></div>'
+    +'<div class="sc-doc-panel"><div class="sc-doc-bar-top">'
+      +'<div class="sc-doc-bar-t">'+scEsc(spec[0])+'</div>'
+      +'<button class="sc-doc-x" onclick="scCloseDoc()" aria-label="Close">&times;</button></div>'
+    +'<div class="sc-doc-body">'+body+'</div>'
+    +'<div class="sc-doc-foot">'
+      +'<button class="btn btn-secondary btn-sm" onclick="window.print()">Print</button>'
+      +'<button class="btn btn-primary btn-sm" onclick="scCloseDoc()">Close</button></div></div>';
+}
 /* FR6.2–6.4 — the availability check. Submission is blocked unless every line has enough free
    stock, and stock reserved for another transaction does not count as available. */
 function scPanel6(txn){
@@ -2671,7 +2836,20 @@ function scPanel6(txn){
         +'Nothing in the warehouse master has the required quantity free, so this shipment cannot be sourced as it stands. '
         +'The SCR needs correcting — ask the Buyer to raise a Return SCR from the PO step.</div>';
   }
-  return '<div class="sc-sec"><div class="sc-sec-h">Issue Items &amp; Availability</div>'
+  /* FR7.4 — "After generation: View Outbound Key shall be enabled on the Shipment page. On click,
+     the complete Outbound Key shall open in read-only mode." Before generation the button says so
+     rather than disappearing, so the Planner knows what Submit will produce. */
+  const okBtn='<div class="sc-sec"><div class="sc-sec-h">Outbound Key</div><div class="sc-kv-grid">'
+    +scRow('Outbound Key No.',scEsc(txn.shipment.outboundKey||'Not generated'))
+    +scRow('Transfer Order No.',scEsc(txn.shipment.transferOrder||'Not generated'))
+    +'</div>'
+    +(txn.shipment.outboundKey
+      ? '<button class="btn btn-secondary btn-sm" style="margin-top:10px" onclick="scOpenDoc(\'outbound\')">View Outbound Key</button>'
+      : '<div class="sc-help" style="margin-top:8px">Generated together with the Transfer Order when you submit the shipment. '
+        +'It is the pick list Stores works from, and it must accompany the material at the gate.</div>')
+    +'</div>';
+  return okBtn
+    +'<div class="sc-sec"><div class="sc-sec-h">Issue Items &amp; Availability</div>'
     +scPanelTable(['#','Issue Item','Shipment Qty','UOM','Warehouse','Storage Loc.','Available','Check','WIP Adj. Ref.'],rows,960)
     +(blocked?'<div class="sc-warn red"><b>Shipment cannot be submitted.</b><br>'+scEsc(blocked)+'</div>'
       :'<div class="sc-warn green"><b>Material is available.</b><br>Submitting reserves these quantities against this shipment and moves them to the Reserved location. No physical movement happens at this stage.</div>')
@@ -2749,32 +2927,53 @@ function scPanelDoc(txn,kind){
       +(isCh?'<td>'+scEsc(it?it.hsn:'')+'</td><td>'+scMoney(Number(txn.po.price||0))+' / '+scEsc(it?it.uom:'')+'</td>'
             :'<td>'+scEsc(sh.lot||'—')+'</td>')+'</tr>';
   }).join('');
-  return '<div class="sc-sec"><div class="sc-sec-h">'+(isCh?'Challan':'Delivery Note')+' document</div>'
-    +'<div class="sc-kv-grid" style="margin-bottom:12px">'
-      +scRow((isCh?'Challan':'Delivery Note')+' No.',scEsc((isCh?txn.challan.no:txn.dn.no)||'Not yet generated'))
-      /* The date OF THE DOCUMENT, not the date it is being looked at. This read scNow() on every
-         render, so a delivery note printed on the 3rd showed the 9th when reopened on the 9th —
-         and two people opening the same challan on different days saw different dates on what is
-         supposed to be one immutable document. It is stamped once, where the number is minted. */
-      +scRow('Date',scEsc(String((isCh?txn.challan.date:txn.dn.date)||'').split(',')[0]||'—'))
-      // The approver named ON THE SHIPMENT (FR7's dnApprover), not a hardcoded role label — and,
-      // once approved, FR9.4's Approved By / Approved Date and Time on the document itself.
-      +(isCh?scRow('Challan Type',scEsc(sh.challanType))+scRow('Generated By',scEsc(txn.challan.generatedBy?scActorLabel(txn.challan.generatedBy):'—'))
-            :scRow('Approver',scEsc(scActorLabel(sh.dnApprover||'dn-approver')))
-             +scRow('Approved By',scEsc(txn.dn.approvedBy?scActorLabel(txn.dn.approvedBy)+' · '+(txn.dn.approvedAt||''):'Not yet approved')))
-      +scRow('Dispatching Unit',scEsc(loc?loc.name:''))
-      +scRow('Consignee',scEsc(v?v.name:s.internalBP))
-      +scRow('Consignee Address',scEsc(v&&(v.addresses.find(function(a){return a.code===s.vendorAddress;})||{}).text))
-      +(isCh?scRow('GSTIN / Tax Identifier',scEsc(loc?loc.gstin:''))
-            +scRow('Nature of Work / Reason for Removal',scEsc(s.opDesc||s.title)):'')
-      +scRow('Expected Date of Return',scEsc(sh.expectedReturn))
+  /* Laid out as the document itself — masthead, the two parties, the goods, the transport — rather
+     than as another key-value panel. These are things a person carries: the challan travels in the
+     vehicle and is produced at the gate, so what is on screen should be recognisably that paper. */
+  const no=isCh?txn.challan.no:txn.dn.no;
+  const st=scDocStatus(txn,isCh?'challan':'dn');
+  /* The date OF THE DOCUMENT, not the date it is being looked at. This read scNow() on every
+     render, so a delivery note printed on the 3rd showed the 9th when reopened on the 9th — and
+     two people opening the same challan on different days saw different dates on what is supposed
+     to be one immutable document. Stamped once, where the number is minted. */
+  const dt=String((isCh?txn.challan.date:txn.dn.date)||'').split(',')[0];
+  return scDocHead(isCh?'Delivery Challan':'Delivery Note',no||'Not yet generated',st,scStatusTone(st),
+      (isCh?'Challan type: '+(sh.challanType||'—'):'For approval by '+scActorLabel(sh.dnApprover||'dn-approver'))
+      +(dt?'   ·   Dated '+dt:''))
+    +'<div class="sc-doc-sec">Consignor</div><div class="sc-doc-grid">'
+      +scDocRow('Dispatching Unit',scEsc(loc?loc.name:''))
+      +scDocRow('Address',scEsc(loc?loc.address:''))
+      +(isCh?scDocRow('GSTIN / Tax Identifier',scEsc(loc?loc.gstin:'')):'')
     +'</div>'
-    +scPanelTable(isCh?['#','Issue Item','Quantity','UOM','HSN Code','Material Value']:['#','Issue Item','Quantity','UOM','Lot / Serial'],rows,600)
-    +'<div class="sc-kv-grid">'+scRow('Packages',scEsc(sh.packages))+scRow('Weight',scEsc(sh.weight?sh.weight+' '+(sh.weightUom||''):''))
-      +scRow('Mode of Dispatch',scEsc(sh.dispatchMode))+scRow('Vehicle No.',scEsc(sh.vehicle))
-      +scRow('Transporter',scEsc(sh.transporter))+scRow('LR / Transport Ref.',scEsc(sh.lr))+'</div>'
-    +(isCh?'<div class="sc-warn amber" style="margin-top:12px"><b>POINT OF NO RETURN</b><br>Once the challan is generated the shipment can no longer be cancelled. Return monitoring against '+scEsc(sh.expectedReturn||'the expected return date')+' starts at Gate Outward, not now.</div>':'')
-    +'</div>';
+    +'<div class="sc-doc-sec">Consignee</div><div class="sc-doc-grid">'
+      +scDocRow('Vendor / Subcontractor',scEsc(v?v.name:s.internalBP))
+      +scDocRow('Address',scEsc(v&&(v.addresses.find(function(a){return a.code===s.vendorAddress;})||{}).text))
+      +(isCh&&v?scDocRow('GSTIN',scEsc(v.gstin)):'')
+      +(isCh?scDocRow('Nature of Work / Reason for Removal',scEsc(s.opDesc||s.title)):'')
+    +'</div>'
+    +'<div class="sc-doc-sec">References</div><div class="sc-doc-grid">'
+      +scDocRow('SCR No.',scEsc(txn.no))+scDocRow('PO No.',scEsc(txn.po.no))
+      +scDocRow('Shipment No.',scEsc(sh.no))
+      +(isCh?scDocRow('Delivery Note No.',scEsc(txn.dn.no)):scDocRow('Outbound Key',scEsc(sh.outboundKey)))
+      +scDocRow('Expected Date of Return',scEsc(sh.expectedReturn))
+      +(isCh?scDocRow('Generated By',scEsc(txn.challan.generatedBy?scActorLabel(txn.challan.generatedBy):''))
+            :scDocRow('Approved By',scEsc(txn.dn.approvedBy?scActorLabel(txn.dn.approvedBy)+' · '+(txn.dn.approvedAt||''):'Not yet approved')))
+    +'</div>'
+    +'<div class="sc-doc-sec">Goods</div>'
+    +scPanelTable(isCh?['#','Issue Item','Quantity','UOM','HSN Code','Material Value']:['#','Issue Item','Quantity','UOM','Lot / Serial'],rows,0)
+    +'<div class="sc-doc-sec">Transport</div><div class="sc-doc-grid">'
+      +scDocRow('Packages',scEsc(sh.packages))
+      +scDocRow('Weight',scEsc(sh.weight?sh.weight+' '+(sh.weightUom||''):''))
+      +scDocRow('Mode of Dispatch',scEsc(sh.dispatchMode))+scDocRow('Vehicle No.',scEsc(sh.vehicle))
+      +scDocRow('Transporter',scEsc(sh.transporter))+scDocRow('Driver',scEsc(sh.driver))
+      +scDocRow('LR / Transport Ref.',scEsc(sh.lr))
+      +(isCh?scDocRow('Gate Pass No.',scEsc(txn.challan.gatePassNo))
+            +scDocRow('Gate Outward',scEsc(txn.challan.gateOutAt)):'')
+    +'</div>'
+    +(isCh?'<div class="sc-warn amber" style="margin-top:14px"><b>POINT OF NO RETURN</b><br>Once the challan is generated the shipment can no longer be cancelled. Return monitoring against '+scEsc(sh.expectedReturn||'the expected return date')+' starts at Gate Outward, not now.</div>':'')
+    +'<div class="sc-doc-sign"><div><span>Prepared by</span><i></i></div>'
+      +'<div><span>Authorised signatory</span><i></i></div>'
+      +'<div><span>Received by (vendor)</span><i></i></div></div>';
 }
 // FR11.2 — the gate check: challan quantity against what security actually counted.
 function scPanel11(txn){
@@ -2961,7 +3160,7 @@ function buildScTxnHTML(){
         +(spec.extra||[]).map(function(a){return '<button class="btn btn-secondary btn-sm" onclick="scOpenSheet(\''+a.id+'\')">'+scEsc(a.label)+'</button>';}).join('')
         +(spec.secondary?'<button class="ep-cancel-btn" onclick="scSecondaryAction()">'+scEsc(spec.secondary.label)+'</button>':'')
         +'<button class="ep-save-btn" onclick="scPrimaryAction()">'+scEsc(spec.primary.label)+'</button>'
-      +'</div>'+scSheetHTML(txn)+'</div>';
+      +'</div>'+scSheetHTML(txn)+scDocSheetHTML(txn)+'</div>';
   }
   // Checker: web / mobile toggle, then the same content in the chosen frame.
   const toggle='<div class="sc-toggle"><span>View as</span>'
@@ -2992,11 +3191,11 @@ function buildScTxnHTML(){
           const off=forward&&block;
           return '<button class="sc-act sc-act-'+a.tone+(off?' sc-act-off':'')+'"'
             +(off?' disabled':' onclick="scOpenSheet(\''+a.id+'\')"')+'>'+scEsc(a.label)+'</button>';}).join('')+'</div>'
-      +'</div></div>'+scSheetHTML(txn)+'</div>';
+      +'</div></div>'+scSheetHTML(txn)+scDocSheetHTML(txn)+'</div>';
   }
   return '<div class="ai-exec-page sc-page">'+head+rail+toggle
     +(block?blockNote:'<div class="sc-warn amber">Read only · pending your decision. Verify the details before acting.</div>')
-    +scStepPanel(txn)+scSummaryHTML(txn)+scActivityHTML(txn)+actionBar+scSheetHTML(txn)+'</div>';
+    +scStepPanel(txn)+scSummaryHTML(txn)+scActivityHTML(txn)+actionBar+scSheetHTML(txn)+scDocSheetHTML(txn)+'</div>';
 }
 
 /* -- ACTION SHEET. Green / amber / red by tone, a consequence sentence, a mini-summary so the
@@ -3128,6 +3327,37 @@ function scInjectCss(){
 .sc-row-mine{background:#fbfaff}
 .sc-row-new{box-shadow:inset 3px 0 0 #6d5bd0}
 .sc-store-warn{background:#fef3c7;border:1px solid #fcd34d;color:#78350f;border-radius:8px;padding:11px 14px;font-size:12.5px;line-height:1.55;margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+/* -- PRINTED DOCUMENT SLIDE-OVER -- */
+.sc-doc-view{border:1px solid var(--border);background:var(--card);border-radius:6px;padding:4px 11px;font-size:11.5px;font-weight:600;color:var(--navy);cursor:pointer;font-family:inherit;transition:border-color .15s,background .15s}
+.sc-doc-view:hover{border-color:var(--navy);background:var(--ol)}
+.sc-doc-back{position:fixed;inset:0;background:rgba(15,23,42,.32);z-index:940;animation:fadeIn .18s ease}
+.sc-doc-panel{position:fixed;top:0;right:0;bottom:0;width:560px;max-width:100vw;z-index:950;background:var(--card);
+  border-left:1px solid var(--border);box-shadow:-18px 0 44px rgba(15,23,42,.16);display:flex;flex-direction:column;animation:sc-doc-in .24s cubic-bezier(.4,0,.2,1)}
+@keyframes sc-doc-in{from{transform:translateX(100%)}to{transform:translateX(0)}}
+.sc-doc-bar-top{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);flex-shrink:0}
+.sc-doc-bar-t{font-size:14px;font-weight:700;color:var(--navy)}
+.sc-doc-x{border:0;background:transparent;font-size:24px;line-height:1;color:var(--gray);cursor:pointer;padding:0 4px;border-radius:6px}
+.sc-doc-x:hover{background:var(--ol);color:var(--navy)}
+.sc-doc-body{flex:1;overflow-y:auto;padding:18px}
+.sc-doc-foot{display:flex;gap:8px;justify-content:flex-end;padding:12px 18px;border-top:1px solid var(--border);flex-shrink:0}
+.sc-doc-head{border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;background:linear-gradient(180deg,var(--ol),var(--card))}
+.sc-doc-title{font-size:11px;font-weight:700;letter-spacing:.9px;text-transform:uppercase;color:var(--gray)}
+.sc-doc-no{font-size:22px;font-weight:800;color:var(--navy);letter-spacing:-.4px;margin:4px 0 8px}
+.sc-doc-sub{font-size:11.5px;color:var(--gray);margin-top:8px}
+.sc-doc-sec{font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--gray);margin:18px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.sc-doc-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 22px}
+.sc-doc-r{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px dashed var(--border);font-size:12.5px}
+.sc-doc-r span{color:var(--gray);flex-shrink:0}
+.sc-doc-r b{color:var(--navy);text-align:right;font-weight:600;word-break:break-word}
+.sc-doc-bar{display:flex;align-items:flex-end;gap:1px;height:44px;margin:4px 0 6px}
+.sc-doc-bar i{display:block;height:100%;background:var(--navy);border-radius:1px}
+.sc-doc-barno{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;letter-spacing:2px;color:var(--gray);margin-bottom:6px}
+.sc-doc-sign{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:26px;padding-top:6px}
+.sc-doc-sign div{display:flex;flex-direction:column-reverse;gap:8px}
+.sc-doc-sign span{font-size:10.5px;color:var(--gray)}
+.sc-doc-sign i{display:block;border-top:1px solid var(--navy);height:26px}
+@media print{.sidebar,.topbar,.sc-doc-back,.sc-doc-bar-top,.sc-doc-foot,#sc-agent-fab,#sc-agent-panel{display:none!important}
+  .sc-doc-panel{position:static;width:100%;box-shadow:none;border:0}}
 .sc-store-warn b{color:#78350f}
 .sc-new{display:inline-block;font-size:9.5px;font-weight:700;letter-spacing:.4px;color:#fff;background:#6d5bd0;border-radius:4px;padding:1px 6px;margin-right:7px;vertical-align:1px}
 .sc-ref{font-weight:700;color:var(--navy);font-size:12.5px}
