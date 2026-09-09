@@ -25,10 +25,11 @@
 
 const SC_AGENTS=[
   {id:'ask-deal',name:'Ask the Deal',tag:'Transaction copilot',initials:'AD',
-   blurb:'Ask about the open transaction — where the material is, what is blocking it, who has acted.',
-   prompts:['Where is my material?','What is blocking this?','What happens next?','Show me the documents','Who has acted on this?']},
+   blurb:'Ask about any transaction, open or closed — quote an SCR, PO, challan, ASN or IMR number, or ask across the whole board.',
+   prompts:['Show me everything open','What is overdue?','What is blocking this?','Where is my material?',
+            'What is with Finance?','Show me the documents','Who has acted on this?','Closed transactions']},
   {id:'recon',name:'Reconciliation Explainer',tag:'FR17 variance',initials:'RE',
-   blurb:'Explains the reconciliation arithmetic and exactly what stands between this transaction and closure.',
+   blurb:'Explains the reconciliation arithmetic for any transaction and exactly what stands between it and closure.',
    prompts:['Explain the reconciliation','Why can I not close this?','How is consumption calculated?','What is outstanding?']}
 ];
 
@@ -64,16 +65,162 @@ function scAgentGate(t){try{return scGateBlock(scAgentClone(t));}catch(e){return
    true of it. == */
 function scAgentMatch(q,words){q=' '+q.toLowerCase()+' ';return words.some(function(w){return q.indexOf(w)>-1;});}
 
-function scAgentAnswerAskDeal(q){
-  const c=scAgentCtx(),t=c.txn;
-  if(!t){
-    const mine=typeof scActionable==='function'?scActionable(c.me):[];
-    if(!mine.length)return 'Nothing is waiting on you right now. Open a transaction from the board and I can tell you where it stands, what is blocking it and who touched it last.';
-    return 'You have **'+mine.length+'** transaction'+(mine.length===1?'':'s')+' waiting on you:\n\n'
-      +mine.slice(0,6).map(function(x){return '· **'+(x.no||'Draft')+'** — step '+x.step+' '+scStep(x.step).short+', waiting '+scSince(x.pendingSince);}).join('\n')
-      +'\n\nOpen one and ask me again — I answer against whichever transaction is on screen.';
+/* == ASKING ABOUT ANY TRANSACTION, NOT JUST THE OPEN ONE ====================================
+   The copilot used to answer only about whatever was on screen, which made it a caption for the
+   current page rather than something you could interrogate. A transaction is identifiable by any
+   of the ELEVEN numbers it carries — SUB, PO, SHP, OUT, TO, DN, CH, GP, ASN, IMR, BOM — and a
+   user quoting any of them means the same record, so all of them resolve. == */
+const SC_AGENT_REF_RX=/\b(?:SUB|PO|SHP|OUT|TO|DN|CH|GP|ASN|IMR|BOM)[-\/ ]?\d{4}[-\/ ]?\d{2,6}\b/ig;
+function scAgentNorm(s){return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');}
+function scAgentDocNos(t){
+  return [t.no,t.po.no,t.shipment.no,t.shipment.outboundKey,t.shipment.transferOrder,
+    t.dn.no,t.challan.no,t.challan.gatePassNo,t.asn.no,t.imr.no,t.bomRef]
+    .filter(Boolean).map(scAgentNorm);
+}
+function scAgentResolve(token){
+  const want=scAgentNorm(token);
+  if(!want)return null;
+  let hit=scState.txns.find(function(t){return scAgentDocNos(t).indexOf(want)>-1;});
+  if(hit)return hit;
+  /* A bare tail ("00151", "151") is how people actually say these out loud. Matched on the END
+     of the stored number rather than the whole of it, because the part a person repeats is the
+     sequence, not the SUB-2026- prefix they share with every other record. */
+  const digits=want.replace(/^[A-Z]+/,'');
+  const tail=digits.replace(/^0+/,'');
+  // Length checked on the DIGITS, not on the zero-stripped tail: "00009" is a five-digit
+  // reference, and testing the stripped "9" skipped the whole branch as too short to be meant.
+  if(digits.length>=2&&tail.length)hit=scState.txns.find(function(t){
+    return scAgentDocNos(t).some(function(n){
+      const nt=n.replace(/^[A-Z]+/,'');
+      return nt.replace(/^0+/,'')===tail||nt.slice(-tail.length).replace(/^0+/,'')===tail;
+    });
+  });
+  return hit||null;
+}
+/* WHO MAY ASK ABOUT WHAT. Internal roles all work for the same company and already see every
+   transaction they have touched, so they may query across the portfolio. External vendors may
+   not: FR13.1 confines a vendor to its own purchase orders, and it would be incoherent to
+   enforce that on the screen and then let the copilot read another vendor's record aloud. */
+function scAgentCanSee(txn){
+  const me=typeof activePersonaId!=='undefined'?scActor(activePersonaId):null;
+  if(!me||!txn)return true;
+  if(!me.vendorCode)return true;                       // internal role
+  return !txn.scr.vendor||txn.scr.vendor===me.vendorCode;
+}
+/* What the question is ABOUT: a transaction named by reference, else the one on screen. */
+function scAgentSubject(q){
+  const tokens=String(q||'').match(SC_AGENT_REF_RX);
+  if(tokens&&tokens.length){
+    for(let i=0;i<tokens.length;i++){
+      const t=scAgentResolve(tokens[i]);
+      if(t)return scAgentCanSee(t)?{txn:t,byRef:true,token:tokens[i]}
+                                  :{txn:null,byRef:true,denied:t,token:tokens[i]};
+    }
+    return {txn:null,byRef:true,token:tokens[0]};
   }
+  /* A standalone run of digits, tried only when no full reference was given — "status of 00151".
+     Four digits minimum so ordinary numbers in a question ("100 units", "step 11") cannot hijack
+     it, and only accepted when it actually resolves. */
+  const bare=String(q||'').match(/\b\d{4,8}\b/g);
+  if(bare)for(let i=0;i<bare.length;i++){
+    const t=scAgentResolve(bare[i]);
+    if(t)return scAgentCanSee(t)?{txn:t,byRef:true,token:bare[i]}
+                                :{txn:null,byRef:true,denied:t,token:bare[i]};
+  }
+  return {txn:scAgentCtx().txn,byRef:false};
+}
+// Portfolio questions are about the set, not about one record.
+function scAgentIsPortfolio(q){
+  return scAgentMatch(q,['all ','list','how many','everything','portfolio','overdue','which ','anything',
+    'open ','pending with','queue','summary of','across','total','count','stuck','waiting']);
+}
+
+/* == THE PORTFOLIO VIEW — the dashboard, answered in prose ================================== */
+function scAgentVisibleTxns(){
+  return scState.txns.filter(function(t){return scAgentCanSee(t);});
+}
+function scAgentLine(t){
+  return '· **'+(t.no||'Draft')+'** — '+(t.closed?('**'+t.status+'**')
+      :('step '+t.step+' '+scStep(t.step).short+', with '+scActorLabel(t.pendingWith)))
+    +(t.closed?'':', waiting '+scSince(t.pendingSince))
+    +(scOverdue(t)?'  ·  OVERDUE':'');
+}
+function scAgentPortfolio(q){
+  const all=scAgentVisibleTxns();
+  const open=all.filter(function(t){return !t.closed;});
+  const closed=all.filter(function(t){return t.closed;});
+  if(!all.length)return 'There are no transactions I can see yet.';
+
+  if(scAgentMatch(q,['overdue','late','breach','sla'])){
+    const od=open.filter(scOverdue);
+    return od.length
+      ? '**'+od.length+'** transaction'+(od.length===1?' is':'s are')+' overdue against the expected return date:\n\n'
+        +od.map(scAgentLine).join('\n')
+      : 'Nothing is overdue. '+open.length+' open transaction'+(open.length===1?'':'s')+', none past its expected return date.';
+  }
+  if(scAgentMatch(q,['closed','rejected','finished','completed','done','history'])){
+    return closed.length
+      ? '**'+closed.length+'** closed or rejected transaction'+(closed.length===1?'':'s')+', retained for audit:\n\n'
+        +closed.slice(0,12).map(scAgentLine).join('\n')
+      : 'Nothing has closed yet — all '+open.length+' transactions are still in flight.';
+  }
+  // "with finance", "at gate outward", "pending with stores"
+  /* Match on the WORDS of a role, not the whole label. "what is with Finance" never contains the
+     literal label "Finance / F&A", so a whole-label test silently fell through to the full board
+     and the question looked like it had been ignored. Words of three letters or more only, so
+     noise words in a label cannot match everything. */
+  const ql=' '+q.toLowerCase()+' ';
+  const actorHit=SC_ACTORS.find(function(a){
+    const words=(a.label+' '+(a.name||'')).toLowerCase().split(/[^a-z]+/).filter(function(w){return w.length>=3;});
+    return words.some(function(w){return ql.indexOf(' '+w)>-1;});});
+  if(actorHit&&scAgentMatch(q,['with','at ','pending','waiting','queue','has ','holding'])){
+    const his=open.filter(function(t){return t.pendingWith===actorHit.id;});
+    return his.length
+      ? '**'+his.length+'** transaction'+(his.length===1?'':'s')+' waiting on **'+actorHit.name+'** ('+actorHit.label+'):\n\n'
+        +his.map(scAgentLine).join('\n')
+      : 'Nothing is waiting on '+actorHit.name+' ('+actorHit.label+') right now.';
+  }
+  const stepHit=SC_STEPS.find(function(s){
+    return s.short&&q.toLowerCase().indexOf(s.short.toLowerCase())>-1;});
+  if(stepHit){
+    const at=open.filter(function(t){return t.step===stepHit.no;});
+    return at.length
+      ? '**'+at.length+'** transaction'+(at.length===1?'':'s')+' at **step '+stepHit.no+' — '+stepHit.name+'**:\n\n'
+        +at.map(scAgentLine).join('\n')
+      : 'Nothing is sitting at step '+stepHit.no+' ('+stepHit.name+') right now.';
+  }
+  // default: the whole board, grouped by phase, the way the dashboard shows it
+  const byStep={};
+  open.forEach(function(t){(byStep[t.step]=byStep[t.step]||[]).push(t);});
+  const od=open.filter(scOverdue).length;
+  return '**'+open.length+'** open transaction'+(open.length===1?'':'s')+
+      (closed.length?', **'+closed.length+'** closed':'')+
+      (od?', **'+od+'** overdue':'')+'.\n\n'
+    +Object.keys(byStep).sort(function(a,b){return a-b;}).map(function(k){
+        return '· **Step '+k+' — '+scStep(Number(k)).short+'** ('+byStep[k].length+'): '
+          +byStep[k].map(function(t){return t.no||'Draft';}).join(', ');
+      }).join('\n')
+    +'\n\nName any reference — an SCR, PO, challan, ASN, IMR — and I will tell you where that one stands.';
+}
+
+function scAgentAnswerAskDeal(q){
+  const c=scAgentCtx();
+  const sub=scAgentSubject(q);
+  if(sub.denied)return 'I cannot open **'+(sub.denied.no||sub.token)+'** for you — it belongs to '
+    +((scVendor(sub.denied.scr.vendor)||{}).name||'another vendor')
+    +', and a vendor login only sees its own purchase orders.';
+  if(sub.byRef&&!sub.txn)return 'I cannot find **'+sub.token+'**. I match on any reference a transaction carries — '
+    +'SCR, PO, shipment, outbound key, delivery note, challan, gate pass, ASN, IMR or BOM. Check the number and ask again.';
+
+  // A reference always wins; otherwise a portfolio-shaped question is about the whole board.
+  if(!sub.byRef&&(!sub.txn||scAgentIsPortfolio(q)))return scAgentPortfolio(q);
+
+  const t=sub.txn;
+  if(!t)return scAgentPortfolio(q);
   const s=t.scr,v=typeof scVendor==='function'?scVendor(s.vendor):null;
+  // Answering about something the user is not looking at: say which record, so the reply is never
+  // mistaken for the page in front of them.
+  const lead=sub.byRef?'':'';
 
   // ---- where is the material
   if(scAgentMatch(q,['material','where','stock','inventory','reserved','position','warehouse'])){
@@ -153,19 +300,45 @@ function scAgentAnswerAskDeal(q){
     return a;
   }
   // ---- default: the whole picture
+  const r=scAgentRecon(t);
   return 'Here is where **'+(t.no||'this transaction')+'** stands:\n\n'
-    +'· Step **'+t.step+' — '+scStep(t.step).name+'**\n'
-    +'· Waiting on **'+scActorLabel(t.pendingWith||'—')+'** for '+scSince(t.pendingSince)+'\n'
+    +(t.closed
+      ? '· **'+t.status+'**'+(t.closedBy?' by '+scActorLabel(t.closedBy)+' on '+t.closedAt:'')+'\n'
+        +'· Reached step '+t.step+' — '+scStep(t.step).name+'\n'
+      : '· Step **'+t.step+' — '+scStep(t.step).name+'**\n'
+        +'· Waiting on **'+scActorLabel(t.pendingWith||'—')+'** for '+scSince(t.pendingSince)+'\n')
     +'· Vendor — '+(v?v.name:(s.internalBP||'—'))+'\n'
-    +'· Receivable — '+(s.recvQty||'—')+' x '+(s.recvItem||'—')+'\n'
+    +'· Receivable — '+(s.recvQty||'—')+' x '+(s.recvItem||'—')
+      +(r&&r.received!==undefined&&t.step>=16?'  ('+r.received+' received, '+r.pending+' pending)':'')+'\n'
     +'· Material position — **'+(t.position||'Main')+'**\n'
-    +'· '+(s.billable==='No'?'Non-billable':'Billable')+', logistics '+(scLogisticsRequired(t)==='Yes'?'required':'not required')+'\n\n'
-    +'Ask me where the material is, what is blocking it, what happens next, or who has acted on it.';
+    +'· '+(s.billable==='No'?'Non-billable':'Billable')+', logistics '+(scLogisticsRequired(t)==='Yes'?'required':'not required')+'\n'
+    +'· Documents — '+scAgentDocNos(t).length+' raised'
+      +(scOverdue(t)?'\n· **OVERDUE** against '+t.shipment.expectedReturn:'')+'\n\n'
+    +(sub.byRef?'Ask me about its material, blockers, documents or history — or name another reference.'
+               :'Ask me where the material is, what is blocking it, what happens next, or who has acted on it.');
 }
 
 function scAgentAnswerRecon(q){
-  const c=scAgentCtx(),t=c.txn;
-  if(!t)return 'Open a transaction and I will walk you through its reconciliation. I explain the FR17 arithmetic — what was issued, what the vendor consumed against the BOM, what came back, and exactly what stands between the transaction and closure.';
+  const sub=scAgentSubject(q);
+  if(sub.denied)return 'I cannot open **'+(sub.denied.no||sub.token)+'** — it belongs to another vendor.';
+  if(sub.byRef&&!sub.txn)return 'I cannot find **'+sub.token+'**. Quote any reference the transaction carries and I will reconcile that one.';
+  const t=sub.txn;
+  if(!t){
+    // Reconciliation across the board, so this agent is useful from the dashboard too.
+    const live=scAgentVisibleTxns().filter(function(x){return x.step>=16&&!x.closed;});
+    if(!live.length)return 'Nothing has reached reconciliation yet. It opens at step 16, once Stores confirms a material receipt.\n\nName any reference and I will reconcile that transaction, open or closed.';
+    return '**'+live.length+'** transaction'+(live.length===1?' is':'s are')+' at or past material receipt:\n\n'
+      +live.map(function(x){const r=scAgentRecon(x);
+        /* Judged on the NUMBERS, not on scGateBlock. That gate only evaluates at step 17, so a
+           transaction sitting at 16 with a thousand units pending came back "ready" — the one
+           thing this line must never get wrong. */
+        const clear=Number(r.pending||0)===0&&Number(r.outstanding||0)===0
+          &&!r.scrapMissingReason&&!r.returnMissingReason&&!r.returnMissingLocation;
+        return '· **'+(x.no||'Draft')+'** — '+r.received+' of '+r.expected+' received, '
+          +r.pending+' pending, '+r.outstanding+' issue material outstanding'
+          +(clear?'  ·  reconciles':'  ·  not yet reconciled');}).join('\n')
+      +'\n\nName one and I will explain its arithmetic and what is blocking closure.';
+  }
   if(t.step<16&&!t.closed)
     return 'Reconciliation has not started on **'+(t.no||'this transaction')+'** yet — it opens once Stores confirms the material receipt at step 16. This is at step '+t.step+' ('+scStep(t.step).short+').\n\nWhat I can tell you now: **'+(t.scr.recvQty||0)+'** units are expected back, against **'
       +(t.scr.issueItems||[]).reduce(function(a,r){return a+Number(r.qty||0);},0)+'** issued to the vendor.';
@@ -267,7 +440,7 @@ function scAgentHTML(){
         return '<button class="sca-chip" onclick="scAgentAsk(this.dataset.q)" data-q="'+p.replace(/"/g,'&quot;')+'">'+p+'</button>';
       }).join('')+'</div>'
     +'<div class="sca-input">'
-      +'<input id="sca-q" placeholder="Ask about this transaction..." autocomplete="off" '
+      +'<input id="sca-q" placeholder="Ask about any transaction, or quote a reference…" autocomplete="off" '
         +'onkeydown="if(event.key===\'Enter\'){event.preventDefault();scAgentSendInput();}">'
       +'<button class="sca-send" onclick="scAgentSendInput()" aria-label="Send">'
         +'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>'
