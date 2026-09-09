@@ -513,17 +513,27 @@ function scAgentHTML(){
                   +String(n).replace(/"/g,'&quot;')+'">'+scAgentMd(n).replace(/<\/?div[^>]*>/g,'')+'</button>';
               }).join('')+'</div>'
           : '';
+        // The message being typed out gets a stable id so the stream can update it in place.
+        const inner=m.streaming
+          ? '<div id="sca-stream">'+scAgentMd(scAgentPartial(m.text,m.shown||0))+'<span class="sca-caret"></span></div>'
+          : scAgentMd(m.text);
         return '<div class="sca-row"><div class="sca-av">'+a.initials+'</div>'
-          +'<div class="sca-bubble-wrap"><div class="sca-bubble sca-bot">'+scAgentMd(m.text)+'</div>'+next+'</div></div>';
+          +'<div class="sca-bubble-wrap"><div class="sca-bubble sca-bot">'+inner+'</div>'+next+'</div></div>';
       }).join('')
-      +(scAgentState.busy?'<div class="sca-row"><div class="sca-av">'+a.initials+'</div>'
-        +'<div class="sca-bubble sca-bot sca-typing"><span></span><span></span><span></span></div></div>':'')
+      /* The thinking row names what it is reading. A spinner says "wait"; this says what for,
+         which is the difference between a loading state and an assistant. */
+      +(scAgentState.busy&&!thread.some(function(m){return m.streaming;})
+        ? '<div class="sca-row"><div class="sca-av sca-av-live">'+a.initials+'</div>'
+          +'<div class="sca-think"><span id="sca-think">'+scEsc((scAgentState.think||['Thinking'])[0])+'</span>'
+          +'<i></i><i></i><i></i></div></div>'
+        : '')
     : '<div class="sca-empty"><div class="sca-empty-av">'+a.initials+'</div>'
       +'<div class="sca-empty-t">'+a.name+'</div><div class="sca-empty-b">'+a.blurb+'</div></div>';
 
   return '<div class="sca-head">'
       +'<div class="sca-head-l"><div class="sca-av sca-av-lg">'+a.initials+'</div>'
-        +'<div><div class="sca-title">'+a.name+'</div><div class="sca-ctx" id="sca-ctx">'+scAgentCtxLabel()+'</div></div></div>'
+        +'<div><div class="sca-title">'+a.name+' <span class="sca-live"></span></div>'
+        +'<div class="sca-ctx" id="sca-ctx">'+scAgentCtxLabel()+'</div></div></div>'
       +'<button class="sca-x" onclick="scAgentToggle()" aria-label="Close">&times;</button>'
     +'</div>'
     +'<div class="sca-tabs">'+SC_AGENTS.map(function(x){
@@ -600,6 +610,12 @@ function scAgentToggle(){
   }else{
     if(scAgentState.tick){clearInterval(scAgentState.tick);scAgentState.tick=null;}
     if(scAgentState.esc){document.removeEventListener('keydown',scAgentState.esc);scAgentState.esc=null;}
+    /* Closing mid-stream completes the message rather than abandoning it half-typed. Without
+       this the thread keeps a truncated answer and `busy` stays true, so the panel reopens
+       permanently unable to accept another question. */
+    scAgentStopStream();
+    scAgentThread().forEach(function(m){if(m.streaming){m.shown=m.text.length;m.streaming=false;}});
+    scAgentState.busy=false;
   }
 }
 function scAgentSwitch(id){scAgentState.agent=id;scAgentRender();}
@@ -611,24 +627,91 @@ function scAgentSendInput(){
   i.value='';
   scAgentAsk(v);
 }
+/* == THINKING, THEN STREAMING ===============================================================
+   The answer is computed synchronously — there is nothing to wait for. But an assistant that
+   returns a finished essay the instant you press Enter reads as a database lookup, and a demo
+   audience reads it as canned. Two things fix that, and neither fakes the content:
+
+     1. A THINKING phase that names what it is actually about to read — "Reading SUB-2026-00014",
+        "Working through the FR17 arithmetic" — rather than a generic spinner.
+     2. STREAMING the reply out. This is the single most recognisable behaviour of a real
+        assistant, and it also lets a long answer be read as it arrives instead of landing as a
+        wall of text.
+
+   The stream updates ONE element rather than re-rendering the panel on every tick, so the input
+   is not destroyed and re-created sixty times while the answer types out. == */
+function scAgentThinkingLabels(q,sub){
+  /* The label has to describe the answer that is actually coming. A board-wide question asked
+     while a transaction happens to be open still resolves a subject, so keying only on that
+     produced "Reading SUB-2026-00016" above a reply about all thirty — the routing rule from
+     scAgentAnswerAskDeal has to be mirrored here or the two disagree. */
+  const board=sub&&!sub.byRef&&(!sub.txn||scAgentIsPortfolio(q));
+  const t=board?null:(sub&&sub.txn),who=t?(t.no||'this transaction'):null;
+  if(sub&&sub.byRef&&!t)return ['Searching every reference','Checking the document numbers'];
+  if(scAgentState.agent==='recon')
+    return [who?'Reading '+who:'Reading the board','Working through the FR17 arithmetic','Checking what blocks closure'];
+  if(!t)return ['Reading the board','Grouping by step and owner','Checking what is overdue'];
+  if(scAgentMatch(q,['block','stuck','why','delay']))return ['Reading '+who,'Checking the gates on step '+t.step,'Looking at who holds it'];
+  if(scAgentMatch(q,['material','where','stock']))return ['Reading '+who,'Tracing the material position','Checking reservations and receipts'];
+  if(scAgentMatch(q,['who','history','log','acted']))return ['Reading '+who,'Walking the activity log'];
+  return ['Reading '+who,'Checking its documents and status'];
+}
+function scAgentStopStream(){
+  if(scAgentState.streamTick){clearInterval(scAgentState.streamTick);scAgentState.streamTick=null;}
+  if(scAgentState.thinkTick){clearInterval(scAgentState.thinkTick);scAgentState.thinkTick=null;}
+}
 function scAgentAsk(q){
   if(scAgentState.busy)return;
   const thread=scAgentThread();
   thread.push({role:'user',text:q});
+  const sub=scAgentSubject(q);
   scAgentState.busy=true;
+  scAgentState.think=scAgentThinkingLabels(q,sub);
+  scAgentState.thinkAt=0;
   scAgentRender();
-  /* A short pause before the reply. Nothing is being fetched — the answer is computed
-     synchronously — but an instant response reads as a lookup rather than as an assistant. */
+  // Rotate the thinking line so a longer pause does not look frozen.
+  scAgentState.thinkTick=setInterval(function(){
+    scAgentState.thinkAt++;
+    const el=document.getElementById('sca-think');
+    if(el&&scAgentState.think[scAgentState.thinkAt])el.textContent=scAgentState.think[scAgentState.thinkAt];
+  },700);
+
   setTimeout(function(){
     let answer,next=[];
     try{
       answer=scAgentAnswer(q);
-      next=scAgentFollowups(q,scAgentSubject(q));
+      next=scAgentFollowups(q,sub);
     }catch(e){answer='I could not read that transaction cleanly just now. Reopen it from the board and ask me again.';}
-    thread.push({role:'bot',text:answer,next:next});
-    scAgentState.busy=false;
+    scAgentStopStream();
+    const msg={role:'bot',text:answer,next:next,shown:0,streaming:true};
+    thread.push(msg);
     scAgentRender();
-  },420+Math.min(600,q.length*8));
+    // Reveal in chunks. Larger steps for long answers so a board listing does not crawl.
+    const step=Math.max(3,Math.round(answer.length/90));
+    scAgentState.streamTick=setInterval(function(){
+      msg.shown+=step;
+      if(msg.shown>=answer.length){
+        msg.shown=answer.length;msg.streaming=false;
+        scAgentStopStream();
+        scAgentState.busy=false;
+        scAgentRender();                       // full render brings in the follow-up chips
+        return;
+      }
+      const el=document.getElementById('sca-stream');
+      if(el){
+        el.innerHTML=scAgentMd(scAgentPartial(answer,msg.shown))+'<span class="sca-caret"></span>';
+        const b=document.getElementById('sca-body');
+        if(b)b.scrollTop=b.scrollHeight;
+      }else{scAgentStopStream();scAgentState.busy=false;scAgentRender();}
+    },16);
+  },520+Math.min(900,q.length*10));
+}
+/* Half-streamed markdown must not render half a rule. An odd number of ** would leave the rest
+   of the answer bolded as it types; the trailing marker is dropped until its partner arrives. */
+function scAgentPartial(text,n){
+  let s=text.slice(0,n);
+  if((s.match(/\*\*/g)||[]).length%2)s=s.slice(0,s.lastIndexOf('**'));
+  return s;
 }
 
 function scAgentMount(){
@@ -659,7 +742,8 @@ function scAgentMount(){
 '.sca-av{width:28px;height:28px;border-radius:8px;background:var(--navy,#0f172a);color:#fff;display:flex;align-items:center;',
 '  justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;letter-spacing:.3px}',
 '.sca-av-lg{width:34px;height:34px;border-radius:10px;font-size:12px}',
-'.sca-title{font-size:14px;font-weight:700;line-height:1.2}',
+'.sca-title{font-size:14px;font-weight:700;line-height:1.2;display:flex;align-items:center;gap:6px}',
+'.sca-live{width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 2.5px rgba(34,197,94,.18);flex-shrink:0}',
 '.sca-ctx{font-size:11.5px;color:var(--gray,#6a7282);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:270px}',
 '.sca-x{border:0;background:transparent;font-size:24px;line-height:1;color:var(--gray,#6a7282);cursor:pointer;padding:0 4px;border-radius:6px}',
 '.sca-x:hover{background:var(--ol,#f1f5f9);color:var(--navy,#0f172a)}',
@@ -675,28 +759,41 @@ function scAgentMount(){
 '  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
 '.sca-tab:hover{border-color:#cbd5e1;color:var(--navy,#0f172a)}',
 '.sca-tab.on{background:var(--navy,#0f172a);border-color:var(--navy,#0f172a);color:#fff}',
-'.sca-body{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;background:var(--light,#f8f9fb)}',
-'.sca-row{display:flex;gap:8px;align-items:flex-start}',
+'.sca-body{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:16px;background:var(--light,#f8f9fb)}',
+'.sca-row{display:flex;gap:9px;align-items:flex-start;animation:fadeUp .22s ease}',
 '.sca-row-me{justify-content:flex-end}',
-'.sca-bubble-wrap{max-width:86%;min-width:0}',
-'.sca-bubble{max-width:82%;padding:10px 12px;border-radius:12px;font-size:12.5px;line-height:1.62;word-break:break-word}',
+'.sca-bubble-wrap{max-width:88%;min-width:0}',
+'.sca-bubble{max-width:82%;padding:11px 13px;border-radius:14px;font-size:12.5px;line-height:1.68;word-break:break-word}',
 '.sca-bubble-wrap .sca-bubble{max-width:100%}',
 '.sca-next{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px}',
 '.sca-next-t{width:100%;font-size:9.5px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--gray,#6a7282);margin-bottom:1px}',
 '.sca-chip-next{background:var(--ol,#f1f5f9);border-style:dashed}',
 '.sca-chip-next:hover{background:var(--card,#fff);border-style:solid}',
-'.sca-bot{background:var(--card,#fff);border:1px solid var(--border,#e5e7eb);border-top-left-radius:4px}',
-'.sca-me{background:var(--navy,#0f172a);color:#fff;border-top-right-radius:4px}',
+'.sca-bot{background:var(--card,#fff);border:1px solid var(--border,#e5e7eb);border-top-left-radius:5px;',
+'  box-shadow:0 1px 2px rgba(15,23,42,.04)}',
+'.sca-bot b{font-weight:650}',
+'.sca-me{background:var(--navy,#0f172a);color:#fff;border-top-right-radius:5px}',
 '.sca-p{margin:0}',
 '.sca-gap{height:7px}',
 '.sca-li{position:relative;padding-left:13px;margin:1px 0}',
 '.sca-li:before{content:"";position:absolute;left:3px;top:8px;width:4px;height:4px;border-radius:50%;background:currentColor;opacity:.42}',
 '.sca-sub{padding-left:13px;color:var(--gray,#6a7282);font-size:11.5px}',
 '.sca-me .sca-sub{color:rgba(255,255,255,.72)}',
-'.sca-typing{display:flex;gap:4px;align-items:center;padding:13px 14px}',
-'.sca-typing span{width:6px;height:6px;border-radius:50%;background:var(--gray,#6a7282);animation:blink 1.3s infinite}',
-'.sca-typing span:nth-child(2){animation-delay:.18s}',
-'.sca-typing span:nth-child(3){animation-delay:.36s}',
+/* THINKING. The label shimmers the way a real assistant's does — a highlight travelling across
+   the text — rather than sitting static next to a spinner. */
+'.sca-think{display:flex;align-items:center;gap:7px;padding:9px 2px;font-size:12.5px;font-weight:500}',
+'.sca-think span{background:linear-gradient(90deg,#94a3b8 0%,#0f172a 42%,#94a3b8 84%);background-size:220% 100%;',
+'  -webkit-background-clip:text;background-clip:text;color:transparent;animation:sca-shimmer 1.6s linear infinite}',
+'@keyframes sca-shimmer{0%{background-position:120% 0}100%{background-position:-120% 0}}',
+'.sca-think i{width:4px;height:4px;border-radius:50%;background:var(--gray,#6a7282);animation:blink 1.3s infinite}',
+'.sca-think i:nth-of-type(2){animation-delay:.18s}',
+'.sca-think i:nth-of-type(3){animation-delay:.36s}',
+'.sca-av-live{position:relative}',
+'.sca-av-live:after{content:"";position:absolute;inset:-3px;border-radius:11px;border:1.5px solid var(--navy,#0f172a);opacity:.25;animation:sca-pulse 1.6s ease-out infinite}',
+'@keyframes sca-pulse{0%{transform:scale(1);opacity:.3}100%{transform:scale(1.32);opacity:0}}',
+/* The caret that trails the streaming text. */
+'.sca-caret{display:inline-block;width:2px;height:13px;background:var(--navy,#0f172a);margin-left:2px;',
+'  vertical-align:-2px;animation:blink .9s steps(1) infinite}',
 '.sca-empty{text-align:center;padding:34px 18px;color:var(--gray,#6a7282)}',
 '.sca-empty-av{width:44px;height:44px;border-radius:13px;background:var(--navy,#0f172a);color:#fff;display:flex;align-items:center;',
 '  justify-content:center;font-size:15px;font-weight:700;margin:0 auto 12px}',
